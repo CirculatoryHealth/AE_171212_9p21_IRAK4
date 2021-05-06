@@ -1,0 +1,6 @@
+gene	phenotype	estimate	statistic	p.value	method	alternative
+IRAK4	macrophages	0.03261068468531817	37870791.96057902	0.41874234448600633	Spearman's rank correlation rho	two.sided
+IRAK4	mast cells	0.23451014117323857	123779.71017228732	0.019470731661326676	Spearman's rank correlation rho	two.sided
+IRAK4	neutrophils	-0.006126212110472653	188608.4197222292	0.9507851510033816	Spearman's rank correlation rho	two.sided
+IRAK4	smooth muscle cells	-0.09246871595498322	42352783.48139415	0.02182500371823022	Spearman's rank correlation rho	two.sided
+IRAK4	vessel density	-0.090743201385095	7082173.791729394	0.09530950511679373	Spearman's rank correlation rho	two.sided

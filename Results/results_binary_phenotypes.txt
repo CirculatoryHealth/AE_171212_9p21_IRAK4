@@ -1,0 +1,6 @@
+gene	phenotype	statistic	p.value	method	alternative
+IRAK4	calc_bin	46065	0.30172463726097	Wilcoxon rank sum test with continuity correction	two.sided
+IRAK4	collagen_bin	25337	0.006269592753082725	Wilcoxon rank sum test with continuity correction	two.sided
+IRAK4	fat_bin_10	31336	0.0285554368408078	Wilcoxon rank sum test with continuity correction	two.sided
+IRAK4	fat_bin_40	38892	0.37133145910049736	Wilcoxon rank sum test with continuity correction	two.sided
+IRAK4	iph_bin	44572	0.5256642897177483	Wilcoxon rank sum test with continuity correction	two.sided

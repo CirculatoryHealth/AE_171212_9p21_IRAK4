@@ -1,0 +1,2286 @@
+---
+title: "Mapping IRAK4, PUS7L, and ANRIL expression in atherosclerotic plaques."
+author: '[Sander W. van der Laan, PhD](https://swvanderlaan.github.io) | @swvanderlaan; Alejandro Lopez-Rincon, PhD'
+date: '`r Sys.Date()`'
+output:
+  html_notebook: 
+    cache: yes
+    code_folding: hide
+    collapse: yes
+    df_print: paged
+    fig.align: center
+    fig_caption: yes
+    fig_height: 10
+    fig_retina: 2
+    fig_width: 12
+    number_sections: yes
+    theme: paper
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+mainfont: Helvetica
+subtitle: A 'druggable-MI-targets' project
+editor_options:
+  chunk_output_type: inline
+---
+```{r global_options, include=FALSE}
+# further define some knitr-options.
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8, fig.path = 'Figures/',
+                      eval = TRUE, warning = FALSE, message = FALSE)
+```
+
+# General Setup
+
+First we will create the proper environment and set some general parameters and folders for the project. 
+
+_* Clean the environment._
+```{r ClearEnvironment, echo = FALSE}
+# rm(list = ls())
+```
+
+_* Set locations, and the working directory ..._
+```{r LocalSystem, echo = FALSE}
+### Operating System Version
+### Mac Pro
+# ROOT_loc = "/Volumes/EliteProQx2Media"
+# GENOMIC_loc = "/Users/svanderlaan/iCloud/Genomics"
+
+### MacBook
+ROOT_loc = "/Users/swvanderlaan"
+GENOMIC_loc = paste0(ROOT_loc, "/iCloud/Genomics")
+
+### Generic Locations
+AEDB_loc = paste0(GENOMIC_loc, "/AE-AAA_GS_DBs")
+LAB_loc = paste0(GENOMIC_loc, "/LabBusiness")
+AEDATA_loc = paste0(ROOT_loc, "/PLINK/_AE_Originals")
+AEGSQC_loc =  paste0(AEDATA_loc, "/AEGS_COMBINED_QC2018")
+
+AEGS_loc=paste0(AEDATA_loc,"/AEGS_COMBINED_EAGLE2_1000Gp3v5HRCr11")
+AERNA_loc=paste0(AEDATA_loc,"/AERNA/QC")
+AESCRNA_loc = paste0(AEDATA_loc, "/AESCRNA/prepped_data")
+AEMS450K1_loc=paste0(AEDATA_loc,"/AEMS450K1")
+AEMS450K2_loc=paste0(AEDATA_loc,"/AEMS450K2")
+
+RESULTS = paste0(ROOT_loc, "/PLINK/analyses/lookups/AE_171212_GBASATEMUR_ZMALLAT/multiAssay")
+PROJECT_loc = paste0(ROOT_loc, "/PLINK/analyses/lookups/AE_171212_GBASATEMUR_ZMALLAT/multiAssay")
+
+### SOME VARIABLES WE NEED DOWN THE LINE
+cat("\nDefining phenotypes and datasets.\n")
+PROJECTNAME="AECPGRNA"
+TARGET_GENES="IRAK4, PUS7L, and ANRIL"
+
+cat("\nCreate a new analysis directory, including subdirectories.\n")
+# Analysis
+ifelse(!dir.exists(file.path(PROJECT_loc, "/",PROJECTNAME)), 
+       dir.create(file.path(PROJECT_loc, "/",PROJECTNAME)), 
+       FALSE)
+ANALYSIS_loc = paste0(PROJECT_loc,"/",PROJECTNAME)
+
+# Plots
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/PLOTS")), 
+       dir.create(file.path(ANALYSIS_loc, "/PLOTS")), 
+       FALSE)
+PLOT_loc = paste0(ANALYSIS_loc,"/PLOTS")
+
+# QC plots
+ifelse(!dir.exists(file.path(PLOT_loc, "/QC")), 
+       dir.create(file.path(PLOT_loc, "/QC")), 
+       FALSE)
+QC_loc = paste0(PLOT_loc,"/QC")
+
+# Output files
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/OUTPUT")), 
+       dir.create(file.path(ANALYSIS_loc, "/OUTPUT")), 
+       FALSE)
+OUT_loc = paste0(ANALYSIS_loc, "/OUTPUT")
+
+# Baseline
+ifelse(!dir.exists(file.path(ANALYSIS_loc, "/BASELINE")), 
+       dir.create(file.path(ANALYSIS_loc, "/BASELINE")), 
+       FALSE)
+BASELINE_loc = paste0(ANALYSIS_loc,"/BASELINE")
+
+cat("\nSetting working directory and listing its contents.\n")
+setwd(paste0(PROJECT_loc))
+getwd()
+list.files()
+```
+
+_* A package-installation function._
+```{r Function: installations, echo=FALSE}
+install.packages.auto <- function(x) { 
+  x <- as.character(substitute(x)) 
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else { 
+    # Update installed packages - this may mean a full upgrade of R, which in turn
+    # may not be warrented. 
+    # update.install.packages.auto(ask = FALSE) 
+    eval(parse(text = sprintf("install.packages(\"%s\", dependencies = TRUE, repos = \"https://cloud.r-project.org/\")", x)))
+  }
+  if(isTRUE(x %in% .packages(all.available = TRUE))) { 
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  } else {
+    if (!requireNamespace("BiocManager"))
+      install.packages("BiocManager")
+    # BiocManager::install() # this would entail updating installed packages, which in turned may not be warrented
+    eval(parse(text = sprintf("BiocManager::install(\"%s\")", x)))
+    eval(parse(text = sprintf("require(\"%s\")", x)))
+  }
+}
+```
+
+_Load those packages._
+```{r Setting: loading_packages, echo=FALSE}
+
+cat("\n* General packages...\n")
+install.packages.auto("readr")
+install.packages.auto("optparse")
+install.packages.auto("tools")
+install.packages.auto("dplyr")
+install.packages.auto("tidyr")
+install.packages.auto("naniar")
+
+# To get 'data.table' with 'fwrite' to be able to directly write gzipped-files
+# Ref: https://stackoverflow.com/questions/42788401/is-possible-to-use-fwrite-from-data-table-with-gzfile
+# install.packages("data.table", repos = "https://Rdatatable.gitlab.io/data.table")
+library(data.table)
+
+install.packages.auto("tidyverse")
+install.packages.auto("knitr")
+install.packages.auto("DT")
+install.packages.auto("eeptools")
+
+# Install the devtools package from Hadley Wickham
+install.packages.auto('devtools')
+
+install.packages.auto("org.Hs.eg.db")
+install.packages.auto("mygene")
+install.packages.auto("EnhancedVolcano")
+
+install.packages.auto("haven")
+install.packages.auto("tableone")
+
+cat("\n* Genomic packages...\n")
+install.packages.auto("GenomicFeatures")
+install.packages.auto("bumphunter")
+install.packages.auto("minfi")
+install.packages.auto("SummarizedExperiment")
+install.packages.auto("IlluminaHumanMethylation450kmanifest")
+install.packages.auto("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+install.packages.auto("FDb.InfiniumMethylation.hg19")
+install.packages.auto("TxDb.Hsapiens.UCSC.hg19.knownGene")
+install.packages.auto("org.Hs.eg.db")
+install.packages.auto("AnnotationDbi")
+install.packages.auto("EnsDb.Hsapiens.v86")
+
+# for plotting
+install.packages.auto("pheatmap")
+install.packages.auto("qqman")
+install.packages.auto("forestplot")
+# for meta-analysis
+install.packages.auto("meta")
+install.packages.auto("bacon")
+
+# The actual DNAmArray package
+cat("\n* DNAmArray package...\n")
+# Also refer to: 
+# - https://molepi.github.io/DNAmArray_workflow/index.html
+# - https://github.com/molepi/DNAmArray
+# - https://github.com/bbmri-nl/BBMRIomics
+library(devtools)
+# install_github("molepi/DNAmArray", force = FALSE)
+library(DNAmArray)
+# install_github("molepi/omicsPrint", ref = "R3.4", force = FALSE)
+# install_github("molepi/omicsPrint", force = FALSE)
+library(omicsPrint)
+# install_github("bbmri-nl/BBMRIomics", subdir = "BBMRIomics", force = FALSE)
+library(BBMRIomics)
+
+# Load MultiAssayExperiment
+cat("\n* MultiAssayExperiment package...\n")
+# if (!require("BiocManager"))
+#     install.packages("BiocManager")
+# BiocManager::install("MultiAssayExperiment")
+
+library(MultiAssayExperiment)
+library(GenomicRanges)
+library(SummarizedExperiment)
+library(RaggedExperiment)
+
+```
+
+We will also create a datestamp and define the Utrecht Science Park Colour Scheme.
+```{r Setting: Colors, echo=FALSE}
+
+Today = format(as.Date(as.POSIXlt(Sys.time())), "%Y%m%d")
+Today.Report = format(as.Date(as.POSIXlt(Sys.time())), "%A, %B %d, %Y")
+
+### UtrechtScienceParkColoursScheme
+###
+### WebsitetoconvertHEXtoRGB:http://hex.colorrrs.com.
+### Forsomefunctionsyoushoulddividethesenumbersby255.
+### 
+###	No.	Color			      HEX	(RGB)						              CHR		  MAF/INFO
+###---------------------------------------------------------------------------------------
+###	1	  yellow			    #FBB820 (251,184,32)				      =>	1		or 1.0>INFO
+###	2	  gold			      #F59D10 (245,157,16)				      =>	2		
+###	3	  salmon			    #E55738 (229,87,56)				      =>	3		or 0.05<MAF<0.2 or 0.4<INFO<0.6
+###	4	  darkpink		    #DB003F ((219,0,63)				      =>	4		
+###	5	  lightpink		    #E35493 (227,84,147)				      =>	5		or 0.8<INFO<1.0
+###	6	  pink			      #D5267B (213,38,123)				      =>	6		
+###	7	  hardpink		    #CC0071 (204,0,113)				      =>	7		
+###	8	  lightpurple	    #A8448A (168,68,138)				      =>	8		
+###	9	  purple			    #9A3480 (154,52,128)				      =>	9		
+###	10	lavendel		    #8D5B9A (141,91,154)				      =>	10		
+###	11	bluepurple		  #705296 (112,82,150)				      =>	11		
+###	12	purpleblue		  #686AA9 (104,106,169)			      =>	12		
+###	13	lightpurpleblue	#6173AD (97,115,173/101,120,180)	=>	13		
+###	14	seablue			    #4C81BF (76,129,191)				      =>	14		
+###	15	skyblue			    #2F8BC9 (47,139,201)				      =>	15		
+###	16	azurblue		    #1290D9 (18,144,217)				      =>	16		or 0.01<MAF<0.05 or 0.2<INFO<0.4
+###	17	lightazurblue	  #1396D8 (19,150,216)				      =>	17		
+###	18	greenblue		    #15A6C1 (21,166,193)				      =>	18		
+###	19	seaweedgreen	  #5EB17F (94,177,127)				      =>	19		
+###	20	yellowgreen		  #86B833 (134,184,51)				      =>	20		
+###	21	lightmossgreen	#C5D220 (197,210,32)				      =>	21		
+###	22	mossgreen		    #9FC228 (159,194,40)				      =>	22		or MAF>0.20 or 0.6<INFO<0.8
+###	23	lightgreen	  	#78B113 (120,177,19)				      =>	23/X
+###	24	green			      #49A01D (73,160,29)				      =>	24/Y
+###	25	grey			      #595A5C (89,90,92)				        =>	25/XY	or MAF<0.01 or 0.0<INFO<0.2
+###	26	lightgrey		    #A2A3A4	(162,163,164)			      =>	26/MT
+###
+###	ADDITIONAL COLORS
+###	27	midgrey			#D7D8D7
+###	28	verylightgrey	#ECECEC"
+###	29	white			#FFFFFF
+###	30	black			#000000
+###----------------------------------------------------------------------------------------------
+
+uithof_color = c("#FBB820","#F59D10","#E55738","#DB003F","#E35493","#D5267B",
+                 "#CC0071","#A8448A","#9A3480","#8D5B9A","#705296","#686AA9",
+                 "#6173AD","#4C81BF","#2F8BC9","#1290D9","#1396D8","#15A6C1",
+                 "#5EB17F","#86B833","#C5D220","#9FC228","#78B113","#49A01D",
+                 "#595A5C","#A2A3A4", "#D7D8D7", "#ECECEC", "#FFFFFF", "#000000")
+
+uithof_color_legend = c("#FBB820", "#F59D10", "#E55738", "#DB003F", "#E35493",
+                        "#D5267B", "#CC0071", "#A8448A", "#9A3480", "#8D5B9A",
+                        "#705296", "#686AA9", "#6173AD", "#4C81BF", "#2F8BC9",
+                        "#1290D9", "#1396D8", "#15A6C1", "#5EB17F", "#86B833",
+                        "#C5D220", "#9FC228", "#78B113", "#49A01D", "#595A5C",
+                        "#A2A3A4", "#D7D8D7", "#ECECEC", "#FFFFFF", "#000000")
+
+#ggplot2 default color palette
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+
+### ----------------------------------------------------------------------------
+```
+
+# Executive summary {.tabset .tabset-fade .tabset-pills}
+
+## ERA-CVD 'druggable-MI-targets'
+<!-- ![ERA-CVD logo]("Users/swvanderlaan/iCloud/Genomics/Projects/#Druggable-MI-Genes/Administration/ERA-CVD\ Logo_CMYK.jpg") -->
+
+For the ERA-CVD 'druggable-MI-targets' project (grantnumber: 01KL1802) we will perform two related RNA sequencing (RNAseq) experiments:
+
+1) conventional ('bulk') RNAseq using RNA extracted from carotid plaque samples, n ± 700. As of `r Today.Report` all samples have been selected and RNA has been extracted; quality control (QC) was performed and we have a dataset of 635 samples.
+
+2) single-cell RNAseq (scRNAseq) of at least n = 40 samples (20 females, 20 males). As of `r Today.Report` data is available of 40 samples (3 females, 15 males), we are extending sampling to get more female samples.
+
+Plaque samples are derived from carotid endarterectomies as part of the [Athero-Express Biobank Study](http:www/atheroexpress.nl) which is an ongoing study in the UMC Utrecht.
+
+
+## Background
+
+In the past decade genome-wide association studies (GWAS) have robustly linked common genetic variation to _coronary artery disease (CAD)_, and identified three genes, _`r TARGET_GENES`_ potentially causally involved in CAD risk. These genes are given in a list below.
+
+- _IRAK4_
+- _PUS7L_
+- _ANRIL_ a.k.a. _CDKN2B-AS1_
+
+Here we will analyze the association between DNAm at specific CpGs with the gene expression of _`r TARGET_GENES`_.
+
+We will construct a list of genes to map. 
+
+```{r targets for mapping}
+
+target_genes <- unlist(c("IRAK4", "PUS7L", "CDKN2B-AS1"))
+
+target_genes
+
+```
+
+
+# Athero-Express Biobank Study {.tabset .tabset-fade .tabset-pills}
+
+The *[Athero-Express Biobank Study (AE)](http://www.atheroexpress.nl){target="_blank"}* contains plaque material of patients that underwent endarterectomyat two Dutch tertiary referral centers. Details of the study design were described before. Briefly, blood and plaque material were obtained during endarterectomy and stored at -80 ℃. Only carotid endarterectomy (CEA) patients were included in the present study. All patients provided informed consent and the study was approved by the medical ethics committee.
+
+## Athero-Express Methylation Study
+We study genome-wide _DNA methylation_ (DNAm) in carotid atherosclerotic plaques using data from the [Athero-Express Biobank Study](http://www.atheroexpress.nl). Previously we published an _Epigenome-Wide Association Study_ (EWAS) [on tobacco smoking](https://www.ahajournals.org/doi/10.1161/CIRCGEN.117.002030) based on plaque-derived DNAm as measured using the [Illumina Human Methylation 450K BeadArray](https://www.ncbi.nlm.nih.gov/pubmed/22126295). 
+
+We used the [DNAmArray libary](https://github.com/molepi/DNAmArray) and associated [Workflow](https://molepi.github.io/DNAmArray_workflow/index.html) for quality control and normalization of the DNAm data. 
+
+Recently, there was an update of the list of problematic probes[^2]. Three groups of probes should generally be filtered out from Infinium microarray analyses: 
+
+1) probes with internal SNPs close to the 3΄ end of the probe (*Group 1*);
+2) probes with non-unique mapping to the bisulfite-converted genome (*Group 2*); and 
+3) probes with off-target hybridization due to partial overlap with non-unique elements (*Group 3*).
+
+More information can be found here: http://zwdzwd.github.io/InfiniumAnnotation#current.
+
+There is also another list, which is partly overlapping with Zhou's, created by Naeem et al.[^3]
+
+[^2]: Zhou W., Laird P.W. and Shen H., "Comprehensive characterization, annotation and innovative use of Infinium DNA Methylation BeadChip probes.", [Nucleic Acids Research, Volume 45, Issue 4, 28 February 2017, Page e22](https://doi.org/10.1093/nar/gkw967).
+
+[^3]: Naeem H., Wong N.C., Chatterton Z. _et al._ "Reducing the risk of false discovery enabling identification of biologically significant genome-wide methylation status using the HumanMethylation450 array." [BMC Genomics 15, 51 (2014).](https://doi.org/10.1186/1471-2164-15-51).
+
+Two sets of samples were randomly selected from the Athero-Express Biobank Study:
+
+- Athero-Express Methylation Study 1 (AEMS450K1)
+- Athero-Express Methylation Study 2 (AEMS450K2)
+
+
+## Athero-Express RNAseq Study
+
+For the ERA-CVD 'druggable-MI-targets' project (grantnumber: 01KL1802) we performed two related RNA sequencing (RNAseq) experiments:
+
+1) conventional ('bulk') RNAseq using RNA extracted from carotid plaque samples, n ± 700. As of `r Today.Report` all samples have been selected and RNA has been extracted; quality control (QC) was performed and we have a dataset of 635 samples (d.d. 2019-12-11 mapped to b37 and Ensembl 87).
+
+2) single-cell RNAseq (scRNAseq) of at least n = 40 samples (20 females, 20 males). As of `r Today.Report` data is available of 40 samples (3 females, 15 males), we are extending sampling to get more female samples.
+
+The bulk RNAseq data are filtered and corrected:
+
+- UMI corrected
+- unmappable genes are excluded
+
+The bulk RNAseq samples were selected such to provide maximal overlap with the AEMS450K and AEGS data, overlapping about 90-95%[^4]. 
+
+[^4]: [Refer to Van der Laan S.W. _et al._](https://doi.org/10.1161/CIRCGEN.117.002030){target="_blank"} for more on the AEMS450K datasets.
+
+
+# Load data {.tabset .tabset-fade .tabset-pills}
+We will load the data:
+
+- Athero-Express clinical data.
+- the AERNA data.
+- the AEMS450K1 and AEMS450K2 data.
+
+## Clinical Data
+Loading Athero-Express Biobank Study clinical and biobank data, as well as the SampleList of genetic data.
+```{r LoadAEDB}
+cat("Loading Athero-Express Biobank Study Database...")
+# METHOD 1: It seems this method gives loads of errors and warnings, which all are hard to comprehend
+#           or debug. We expect 3,527 samples, and 927 variables; we get 927 variables!!!
+# AEdata = as.data.table(read.spss(paste0(INP_loc,"/2017-1NEW_AtheroExpressDatabase_ScientificAE_20171306_v1.0.sav"),
+#                                  trim.factor.names = TRUE, trim_values = TRUE, # we trim spaces in values
+#                                  reencode = TRUE, # we re-encode to the local locale encoding
+#                                  add.undeclared.levels = "append", # we do *not* want to convert to R-factors
+#                                  use.value.labels = FALSE, # we do *not* convert variables with value labels into R factors
+#                                  use.missings = TRUE, sub = "NA", # we will set every missing variable to NA
+#                                  duplicated.value.labels = "condense", # we will condense duplicated value labels
+#                                  to.data.frame = TRUE))
+# AEdata.labels <- as.data.table(attr(AEdata, "variable.labels"))
+# names(AEdata.labels) <- "Variable"
+
+# METHOD 2: Using library("haven") importing seems flawless; best argument being:
+#           we expect 3,527 samples and 888 variables, which is what you'd get with this method
+#           So for now, METHOD 2 is prefered. 
+#            
+require(haven)
+
+# AEDB <- haven::read_sav(paste0(AEDB_loc, "/2019-3NEW_AtheroExpressDatabase_ScientificAE_02072019_IC_added.sav"))
+AEDB <- haven::read_sav(paste0(AEDB_loc, "/2020_1_NEW_AtheroExpressDatabase_ScientificAE_16-03-2020.sav"))
+
+# writing off the SPSS data to an Excel.
+# fwrite(AEdata, file = paste0(INP_loc,"/2017-1NEW_AtheroExpressDatabase_ScientificAE_20171306_v1.0.values.xlsx"), 
+#        sep = ";", na = "NA", dec = ".", col.names = TRUE, row.names = FALSE,
+#        dateTimeAs = "ISO", showProgress = TRUE, verbose = TRUE)
+# warnings()
+
+AEDB[1:10, 1:10]
+dim(AEDB)
+
+cat("* load in the Athero-Express (i.e. EDTA, plaque, protein) biobank data.")
+require(openxlsx)
+AEDB_ProtConc <- openxlsx::read.xlsx(paste0(AEDB_loc, "/_Vriezer/20190919_Freezers_preTCBio.xlsx"),
+                                     sheet = "ProteinConc.",
+                                     skipEmptyCols = TRUE)
+
+AEDB_Blood <- openxlsx::read.xlsx(paste0(AEDB_loc, "/_Vriezer/20190919_Freezers_preTCBio.xlsx"),
+                                     sheet = "Blood",
+                                     skipEmptyCols = TRUE)
+AEDB_Plaque <- openxlsx::read.xlsx(paste0(AEDB_loc, "/_Vriezer/20190919_Freezers_preTCBio.xlsx"),
+                                     sheet = "Plaque",
+                                     skipEmptyCols = TRUE)
+
+head(AEDB_ProtConc)
+head(AEDB_Blood)
+head(AEDB_Plaque)
+
+cat("* get list of UPIDs-studynumber to Zipcode/City mapping")
+UPID_ZIPcodes = as.data.table(read.xlsx(paste0(AEDB_loc,"/20170821_UPID_ZIPcodes_basedon_20141208.xlsx"),
+                                      sheet = 1, colNames = TRUE, rowNames = TRUE, detectDates = TRUE,
+                                      skipEmptyRows = TRUE, skipEmptyCols = TRUE, na.strings = c("NA", ".", "")))
+dim(UPID_ZIPcodes)
+names(UPID_ZIPcodes)[names(UPID_ZIPcodes) == "STUDY_STYPE"] <- "STUDY_TYPE"
+UPID_ZIPcodes[1:10, 1:5]
+
+cat("* get Athero-Express Genomics Study keys...")
+AEGS123.sampleList.keytable <- fread(paste0(AEGSQC_loc, "/QC/SELECTIONS/20200319.QC.AEGS123.sampleList.keytable.txt"))
+
+dim(AEGS123.sampleList.keytable)
+# AEGS123.sampleList.keytable[1:10, 1:10]
+
+```
+
+
+### Examine AEDB
+
+We can examine the contents of the Athero-Express Biobank dataset to know what each variable is called, what class (type) it has, and what the variable description is. 
+
+There is an excellent post on this: https://www.r-bloggers.com/working-with-spss-labels-in-r/. 
+```{r AEDB: describe}
+AEDB %>% sjPlot::view_df(show.type = TRUE,
+                         show.frq = TRUE,
+                         show.prc = TRUE,
+                         show.na = TRUE, 
+                         max.len = TRUE, 
+                         wrap.labels = 20,
+                         verbose = FALSE, 
+                         use.viewer = FALSE,
+                         file = paste0(OUT_loc, "/", Today, ".AEDB.dictionary.html")) 
+```
+
+
+### Fix clinical data
+
+We need to be very strict in defining _symptoms._ Therefore we will fix a new variable that groups _symptoms_ at inclusion.
+
+Coding of _symptoms_ is as follows:
+
+- missing	-999	
+- Asymptomatic	0	
+- TIA	1	
+- minor stroke	2	
+- Major stroke	3	
+- Amaurosis fugax	4	
+- Four vessel disease	5	
+- Vertebrobasilary TIA	7	
+- Retinal infarction	8	
+- Symptomatic, but aspecific symtoms	9
+- Contralateral symptomatic occlusion	10	
+- retinal infarction	11	
+- armclaudication due to occlusion subclavian artery, CEA needed for bypass	12	
+- retinal infarction + TIAs	13	
+- Ocular ischemic syndrome	14	
+- ischemisch glaucoom	15	
+- subclavian steal syndrome	16	
+- TGA	17
+
+We will group as follows:
+
+1. Asymptomatic > 0
+2. TIA > 1, 7, 13
+3. Stroke > 2, 3
+4. Ocular > 4, 14, 15
+5. Retinal infarction > 8, 11
+6. Other > 5, 9, 10, 12, 16, 17
+
+
+```{r FixSymptoms}
+
+# Fix symptoms
+
+attach(AEDB)
+AEDB[,"Symptoms.5G"] <- NA
+AEDB$Symptoms.5G[sympt == 0] <- "Asymptomatic"
+AEDB$Symptoms.5G[sympt == 1 | sympt == 7 | sympt == 13] <- "TIA"
+AEDB$Symptoms.5G[sympt == 2 | sympt == 3] <- "Stroke"
+AEDB$Symptoms.5G[sympt == 4 | sympt == 14 | sympt == 15 ] <- "Ocular"
+AEDB$Symptoms.5G[sympt == 8 | sympt == 11] <- "Retinal infarction"
+AEDB$Symptoms.5G[sympt == 5 | sympt == 9 | sympt == 10 | sympt == 12 | sympt == 16 | sympt == 17] <- "Other"
+
+
+# AsymptSympt
+AEDB[,"AsymptSympt"] <- NA
+AEDB$AsymptSympt[sympt == -999] <- NA
+AEDB$AsymptSympt[sympt == 0] <- "Asymptomatic"
+AEDB$AsymptSympt[sympt == 1 | sympt == 7 | sympt == 13 | sympt == 2 | sympt == 3] <- "Symptomatic"
+AEDB$AsymptSympt[sympt == 4 | sympt == 14 | sympt == 15 | sympt == 8 | sympt == 11 | sympt == 5 | sympt == 9 | sympt == 10 | sympt == 12 | sympt == 16 | sympt == 17] <- "Ocular and others"
+
+# AsymptSympt
+AEDB[,"AsymptSympt2G"] <- NA
+AEDB$AsymptSympt2G[sympt == -999] <- NA
+AEDB$AsymptSympt2G[sympt == 0] <- "Asymptomatic"
+AEDB$AsymptSympt2G[sympt == 1 | sympt == 7 | sympt == 13 | sympt == 2 | sympt == 3 | sympt == 4 | sympt == 14 | sympt == 15 | sympt == 8 | sympt == 11 | sympt == 5 | sympt == 9 | sympt == 10 | sympt == 12 | sympt == 16 | sympt == 17] <- "Symptomatic"
+
+detach(AEDB)
+
+# table(AEDB$sympt, useNA = "ifany")
+# table(AEDB$AsymptSympt2G, useNA = "ifany")
+# table(AEDB$Symptoms.5G, useNA = "ifany")
+# 
+# table(AEDB$AsymptSympt2G, AEDB$sympt, useNA = "ifany")
+# table(AEDB$Symptoms.5G, AEDB$sympt, useNA = "ifany")
+table(AEDB$AsymptSympt2G, AEDB$Symptoms.5G, useNA = "ifany")
+
+# AEDB.temp <- subset(AEDB,  select = c("STUDY_NUMBER", "UPID", "Age", "Gender", "Hospital", "Artery_summary", "sympt", "Symptoms.5G", "AsymptSympt"))
+# require(labelled)
+# AEDB.temp$Gender <- to_factor(AEDB.temp$Gender)
+# AEDB.temp$Hospital <- to_factor(AEDB.temp$Hospital)
+# AEDB.temp$Artery_summary <- to_factor(AEDB.temp$Artery_summary)
+# 
+# DT::datatable(AEDB.temp[1:10,], caption = "Excerpt of the whole AEDB.", rownames = FALSE)
+# 
+# table(AEDB.temp$Symptoms.5G, AEDB.temp$AsymptSympt)
+# 
+# rm(AEDB.temp)
+```
+
+We will also fix the _plaquephenotypes_ variable.  
+
+Coding of symptoms is as follows:
+
+- missing	-999	
+- not relevant -888
+- fibrous	1	
+- fibroatheromatous	2	
+- atheromatous	3	
+
+
+```{r FixPlaquePhenotypes}
+
+# Fix plaquephenotypes
+attach(AEDB)
+AEDB[,"OverallPlaquePhenotype"] <- NA
+AEDB$OverallPlaquePhenotype[plaquephenotype == -888] <- NA
+AEDB$OverallPlaquePhenotype[plaquephenotype == -999] <- NA
+AEDB$OverallPlaquePhenotype[plaquephenotype == 1] <- "fibrous"
+AEDB$OverallPlaquePhenotype[plaquephenotype == 2] <- "fibroatheromatous"
+AEDB$OverallPlaquePhenotype[plaquephenotype == 3] <- "atheromatous"
+detach(AEDB)
+
+table(AEDB$OverallPlaquePhenotype, AEDB$plaquephenotype, useNA = "ifany")
+
+# AEDB.temp <- subset(AEDB,  select = c("STUDY_NUMBER", "UPID", "Age", "Gender", "Hospital", "Artery_summary", "plaquephenotype", "OverallPlaquePhenotype"))
+# require(labelled)
+# AEDB.temp$Gender <- to_factor(AEDB.temp$Gender)
+# AEDB.temp$Hospital <- to_factor(AEDB.temp$Hospital)
+# AEDB.temp$Artery_summary <- to_factor(AEDB.temp$Artery_summary)
+# 
+# DT::datatable(AEDB.temp[1:10,], caption = "Excerpt of the whole AEDB.", rownames = FALSE)
+# 
+# rm(AEDB.temp)
+
+```
+
+We will also fix the _diabetes_ status variable.
+
+```{r FixDiabetes}
+
+# Fix diabetes
+attach(AEDB)
+AEDB[,"DiabetesStatus"] <- NA
+AEDB$DiabetesStatus[DM.composite == -999] <- NA
+AEDB$DiabetesStatus[DM.composite == 0] <- "Control (no Diabetes Dx/Med)"
+AEDB$DiabetesStatus[DM.composite == 1] <- "Diabetes"
+detach(AEDB)
+
+table(AEDB$DiabetesStatus, AEDB$DM.composite, useNA = "ifany")
+
+# AEDB.temp <- subset(AEDB,  select = c("STUDY_NUMBER", "UPID", "Age", "Gender", "Hospital", "Artery_summary", "DM.composite", "DiabetesStatus"))
+# require(labelled)
+# AEDB.temp$Gender <- to_factor(AEDB.temp$Gender)
+# AEDB.temp$Hospital <- to_factor(AEDB.temp$Hospital)
+# AEDB.temp$Artery_summary <- to_factor(AEDB.temp$Artery_summary)
+# AEDB.temp$DiabetesStatus <- to_factor(AEDB.temp$DiabetesStatus)
+# 
+# DT::datatable(AEDB.temp[1:10,], caption = "Excerpt of the whole AEDB.", rownames = FALSE)
+# 
+# rm(AEDB.temp)
+
+```
+
+
+We will also fix the _smoking_ status variable. We are interested in whether someone never, ever or is currently (at the time of inclusion) smoking. This is based on the questionnaire. 
+
+- `diet801`: are you a smoker?
+- `diet802`: did you smoke in the past?
+
+We already have some variables indicating smoking status:
+
+- `SmokingReported`: patient has reported to smoke.
+- `SmokingYearOR`: smoking in the year of surgery?
+- `SmokerCurrent`: currently smoking?
+
+
+
+```{r FixSmoking}
+require(labelled)
+AEDB$diet801 <- to_factor(AEDB$diet801)
+AEDB$diet802 <- to_factor(AEDB$diet802)
+AEDB$diet805 <- to_factor(AEDB$diet805)
+AEDB$SmokingReported <- to_factor(AEDB$SmokingReported)
+AEDB$SmokerCurrent <- to_factor(AEDB$SmokerCurrent)
+AEDB$SmokingYearOR <- to_factor(AEDB$SmokingYearOR)
+
+# table(AEDB$diet801)
+# table(AEDB$diet802)
+# table(AEDB$SmokingReported)
+# table(AEDB$SmokerCurrent)
+# table(AEDB$SmokingYearOR)
+# table(AEDB$SmokingReported, AEDB$SmokerCurrent, useNA = "ifany", dnn = c("Reported smoking", "Current smoker"))
+# 
+# table(AEDB$diet801, AEDB$diet802, useNA = "ifany", dnn = c("Smoker", "Past smoker"))
+
+cat("\nFixing smoking status.\n")
+attach(AEDB)
+AEDB[,"SmokerStatus"] <- NA
+AEDB$SmokerStatus[diet802 == "don't know"] <- "Never smoked"
+AEDB$SmokerStatus[diet802 == "I still smoke"] <- "Current smoker"
+AEDB$SmokerStatus[SmokerCurrent == "no" & diet802 == "no"] <- "Never smoked"
+AEDB$SmokerStatus[SmokerCurrent == "no" & diet802 == "yes"] <- "Ex-smoker"
+AEDB$SmokerStatus[SmokerCurrent == "yes"] <- "Current smoker"
+AEDB$SmokerStatus[SmokerCurrent == "no data available/missing"] <- NA
+# AEDB$SmokerStatus[is.na(SmokerCurrent)] <- "Never smoked"
+detach(AEDB)
+
+cat("\n* Current smoking status.\n")
+table(AEDB$SmokerCurrent,
+      useNA = "ifany", 
+      dnn = c("Current smoker"))
+
+cat("\n* Updated smoking status.\n")
+table(AEDB$SmokerStatus,
+      useNA = "ifany", 
+      dnn = c("Updated smoking status"))
+
+cat("\n* Comparing to 'SmokerCurrent'.\n")
+table(AEDB$SmokerStatus, AEDB$SmokerCurrent, 
+      useNA = "ifany", 
+      dnn = c("Updated smoking status", "Current smoker"))
+
+# AEDB.temp <- subset(AEDB,  select = c("STUDY_NUMBER", "UPID", "Age", "Gender", "Hospital", "Artery_summary", "DM.composite", "DiabetesStatus"))
+# require(labelled)
+# AEDB.temp$Gender <- to_factor(AEDB.temp$Gender)
+# AEDB.temp$Hospital <- to_factor(AEDB.temp$Hospital)
+# AEDB.temp$Artery_summary <- to_factor(AEDB.temp$Artery_summary)
+# AEDB.temp$DiabetesStatus <- to_factor(AEDB.temp$DiabetesStatus)
+# 
+# DT::datatable(AEDB.temp[1:10,], caption = "Excerpt of the whole AEDB.", rownames = FALSE)
+# 
+# rm(AEDB.temp)
+
+
+```
+
+We will also fix the _alcohol_ status variable.
+
+
+```{r FixAlcohol}
+
+# Fix diabetes
+attach(AEDB)
+AEDB[,"AlcoholUse"] <- NA
+AEDB$AlcoholUse[diet810 == -999] <- NA
+AEDB$AlcoholUse[diet810 == 0] <- "No"
+AEDB$AlcoholUse[diet810 == 1] <- "Yes"
+detach(AEDB)
+
+table(AEDB$AlcoholUse, useNA = "ifany")
+
+# AEDB.temp <- subset(AEDB,  select = c("STUDY_NUMBER", "UPID", "Age", "Gender", "Hospital", "Artery_summary", "diet810", "AlcoholUse"))
+# require(labelled)
+# AEDB.temp$Gender <- to_factor(AEDB.temp$Gender)
+# AEDB.temp$Hospital <- to_factor(AEDB.temp$Hospital)
+# AEDB.temp$Artery_summary <- to_factor(AEDB.temp$Artery_summary)
+# AEDB.temp$AlcoholUse <- to_factor(AEDB.temp$AlcoholUse)
+# 
+# DT::datatable(AEDB.temp[1:10,], caption = "Excerpt of the whole AEDB.", rownames = FALSE)
+# 
+# rm(AEDB.temp)
+
+
+```
+
+
+We will also fix and inverse-rank normal transform the continuous (manually) scored plaque phenotypes.
+
+```{r IRNT PlaquePhenotypes}
+AEDB$macmean0 <- as.numeric(AEDB$macmean0)
+AEDB$smcmean0 <- as.numeric(AEDB$smcmean0)
+AEDB$neutrophils <- as.numeric(AEDB$neutrophils)
+AEDB$Mast_cells_plaque <- as.numeric(AEDB$Mast_cells_plaque)
+AEDB$vessel_density_averaged <- as.numeric(AEDB$vessel_density_averaged)
+
+AEDB$MAC_rankNorm <- qnorm((rank(AEDB$macmean0, na.last = "keep") - 0.5) / sum(!is.na(AEDB$macmean0)))
+AEDB$SMC_rankNorm <- qnorm((rank(AEDB$smcmean0, na.last = "keep") - 0.5) / sum(!is.na(AEDB$smcmean0)))
+AEDB$Neutrophils_rankNorm <- qnorm((rank(AEDB$neutrophils, na.last = "keep") - 0.5) / sum(!is.na(AEDB$neutrophils)))
+AEDB$MastCells_rankNorm <- qnorm((rank(AEDB$Mast_cells_plaque, na.last = "keep") - 0.5) / sum(!is.na(AEDB$Mast_cells_plaque)))
+AEDB$VesselDensity_rankNorm <- qnorm((rank(AEDB$vessel_density_averaged, na.last = "keep") - 0.5) / sum(!is.na(AEDB$vessel_density_averaged)))
+
+```
+
+
+```{r IRNT PlaquePhenotypes: Visualisation}
+library(labelled)
+AEDB$Gender <- to_factor(AEDB$Gender)
+library(patchwork)
+
+p1 <- ggpubr::gghistogram(AEDB, "macmean0", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "% of macrophages (CD68)",
+                    xlab = "% per region of interest", 
+                    ggtheme = theme_minimal())
+
+p2 <- ggpubr::gghistogram(AEDB, "MAC_rankNorm", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "% of macrophages (CD68)",
+                   xlab = "% per region of interest\ninverse-rank normalized number", 
+                    ggtheme = theme_minimal())
+
+p1 | p2 
+
+p1 <- ggpubr::gghistogram(AEDB, "smcmean0", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "% of smooth muscle cells (SMA)",
+                    xlab = "% per region of interest", 
+                    ggtheme = theme_minimal())
+
+p2 <- ggpubr::gghistogram(AEDB, "SMC_rankNorm", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "% of smooth muscle cells (SMA)",
+                   xlab = "% per region of interest\ninverse-rank normalized number", 
+                    ggtheme = theme_minimal())
+
+p1 | p2 
+
+
+p1 <- ggpubr::gghistogram(AEDB, "neutrophils", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of neutrophils (CD66b)",
+                    xlab = "counts per plaque", 
+                    ggtheme = theme_minimal())
+
+p2 <- ggpubr::gghistogram(AEDB, "Neutrophils_rankNorm", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of neutrophils (CD66b)",
+                   xlab = "counts per plaque\ninverse-rank normalized number", 
+                    ggtheme = theme_minimal())
+
+p1 | p2 
+
+
+p1 <- ggpubr::gghistogram(AEDB, "Mast_cells_plaque", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of mast cells",
+                    xlab = "counts per plaque", 
+                    ggtheme = theme_minimal())
+
+p2 <- ggpubr::gghistogram(AEDB, "MastCells_rankNorm", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of mast cells",
+                   xlab = "counts per plaque\ninverse-rank normalized number", 
+                    ggtheme = theme_minimal())
+
+p1 | p2 
+
+
+p1 <- ggpubr::gghistogram(AEDB, "vessel_density_averaged", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of intraplaque neovessels",
+                    xlab = "counts per 3-4 hotspots", 
+                    ggtheme = theme_minimal())
+
+p2 <- ggpubr::gghistogram(AEDB, "VesselDensity_rankNorm", 
+                    # y = "..count..", 
+                    color = "white",
+                    fill = "Gender",
+                    palette = c("#1290D9", "#DB003F"), 
+                    add = "median", 
+                    #add_density = TRUE,
+                    rug = TRUE,
+                    #add.params =  list(color = "black", linetype = 2), 
+                    title = "number of intraplaque neovessels",
+                   xlab = "counts per 3-4 hotspots\ninverse-rank normalized number", 
+                    ggtheme = theme_minimal())
+
+p1 | p2 
+
+rm(p1, p2)
+```
+
+
+
+Here we calculate the _plaque instability/vulnerability_ index
+
+```{r Plaque Vulnerability}
+# Plaque vulnerability
+require(labelled)
+AEDB$Macrophages.bin <- to_factor(AEDB$Macrophages.bin)
+AEDB$SMC.bin <- to_factor(AEDB$SMC.bin)
+AEDB$IPH.bin <- to_factor(AEDB$IPH.bin)
+AEDB$Calc.bin <- to_factor(AEDB$Calc.bin)
+AEDB$Collagen.bin <- to_factor(AEDB$Collagen.bin)
+AEDB$Fat.bin_10 <- to_factor(AEDB$Fat.bin_10)
+AEDB$Fat.bin_40 <- to_factor(AEDB$Fat.bin_40)
+
+table(AEDB$Macrophages.bin)
+table(AEDB$Fat.bin_10)
+table(AEDB$Collagen.bin)
+table(AEDB$SMC.bin)
+table(AEDB$IPH.bin)
+
+# SPSS code
+
+# 
+# *** syntax- Plaque vulnerability**.
+# COMPUTE Macro_instab = -999.
+# IF macrophages.bin=2 Macro_instab=1.
+# IF macrophages.bin=1 Macro_instab=0.
+# EXECUTE.
+# 
+# COMPUTE Fat10_instab = -999.
+# IF Fat.bin_10=2 Fat10_instab=1.
+# IF Fat.bin_10=1 Fat10_instab=0.
+# EXECUTE.
+# 
+# COMPUTE coll_instab=-999.
+# IF Collagen.bin=2 coll_instab=0.
+# IF Collagen.bin=1 coll_instab=1.
+# EXECUTE.
+# 
+# 
+# COMPUTE SMC_instab=-999.
+# IF SMC.bin=2 SMC_instab=0.
+# IF SMC.bin=1 SMC_instab=1.
+# EXECUTE.
+# 
+# COMPUTE IPH_instab=-999.
+# IF IPH.bin=0 IPH_instab=0.
+# IF IPH.bin=1 IPH_instab=1.
+# EXECUTE.
+# 
+# COMPUTE Instability=Macro_instab + Fat10_instab +  coll_instab + SMC_instab + IPH_instab.
+# EXECUTE.
+
+# Fix plaquephenotypes
+attach(AEDB)
+# mac instability
+AEDB[,"MAC_Instability"] <- NA
+AEDB$MAC_Instability[Macrophages.bin == -999] <- NA
+AEDB$MAC_Instability[Macrophages.bin == "no/minor"] <- 0
+AEDB$MAC_Instability[Macrophages.bin == "moderate/heavy"] <- 1
+
+# fat instability
+AEDB[,"FAT10_Instability"] <- NA
+AEDB$FAT10_Instability[Fat.bin_10 == -999] <- NA
+AEDB$FAT10_Instability[Fat.bin_10 == " <10%"] <- 0
+AEDB$FAT10_Instability[Fat.bin_10 == " >10%"] <- 1
+
+# col instability 
+AEDB[,"COL_Instability"] <- NA
+AEDB$COL_Instability[Collagen.bin == -999] <- NA
+AEDB$COL_Instability[Collagen.bin == "no/minor"] <- 1
+AEDB$COL_Instability[Collagen.bin == "moderate/heavy"] <- 0
+
+# smc instability
+AEDB[,"SMC_Instability"] <- NA
+AEDB$SMC_Instability[SMC.bin == -999] <- NA
+AEDB$SMC_Instability[SMC.bin == "no/minor"] <- 1
+AEDB$SMC_Instability[SMC.bin == "moderate/heavy"] <- 0
+
+# iph instability
+AEDB[,"IPH_Instability"] <- NA
+AEDB$IPH_Instability[IPH.bin == -999] <- NA
+AEDB$IPH_Instability[IPH.bin == "no"] <- 0
+AEDB$IPH_Instability[IPH.bin == "yes"] <- 1
+
+detach(AEDB)
+
+table(AEDB$MAC_Instability, useNA = "ifany")
+table(AEDB$FAT10_Instability, useNA = "ifany")
+table(AEDB$COL_Instability, useNA = "ifany")
+table(AEDB$SMC_Instability, useNA = "ifany")
+table(AEDB$IPH_Instability, useNA = "ifany")
+
+# creating vulnerability index
+AEDB <- AEDB %>% mutate(Plaque_Vulnerability_Index = factor(rowSums(.[grep("_Instability", names(.))], na.rm = TRUE)),
+                                )
+
+table(AEDB$Plaque_Vulnerability_Index, useNA = "ifany")
+
+# str(AEDB$Plaque_Vulnerability_Index)
+
+```
+
+
+### Prepare baseline characteristics
+
+We are interested in the following variables at baseline.
+
+- Age (years)
+- Female sex (N, %)
+- Hypertension (N, %)
+- SBP (mmHg)
+- DBP (mmHg)
+- Diabetes mellitus (N, %)
+- Total cholesterol levels (mg/dL)
+- LDL cholesterol levels (mg/dL)
+- HDL cholesterol levels (mg/dL)
+- Triglyceride levels (mg/dL)
+- Use of statins (N, %)
+- Use of antiplatelet drugs (N, %)
+- BMI (kg/m²)
+- Smoking status (N, %)
+  - Never smokers
+  - Ex-smokers
+  - Current smokers
+- History of CAD (N, %)
+- History of PAD (N, %)
+- Clinical manifestations
+  - Asymptomatic
+  - Amaurosis fugax
+  - TIA
+  - Stroke
+- eGFR (mL/min/1.73 m²)
+- stenosis
+- year of surgery
+- plaque characteristics
+
+
+```{r Baseline AEDB: preparation}
+cat("====================================================================================================\n")
+cat("SELECTION THE SHIZZLE\n")
+
+### Artery levels
+# AEdata$Artery_summary: 
+#           value                                                                                   label
+# NOT USE - 0 No artery known (yet), no surgery (patient ill, died, exited study), re-numbered to AAA
+# USE - 1                                                                  carotid (left & right)
+# USE - 2                                               femoral/iliac (left, right or both sides)
+# NOT USE - 3                                               other carotid arteries (common, external)
+# NOT USE - 4                                   carotid bypass and injury (left, right or both sides)
+# NOT USE - 5                                                         aneurysmata (carotid & femoral)
+# NOT USE - 6                                                                                   aorta
+# NOT USE - 7                                            other arteries (renal, popliteal, vertebral)
+# NOT USE - 8                        femoral bypass, angioseal and injury (left, right or both sides)
+
+### AEdata$informedconsent
+#           value                                                                                           label
+# NOT USE - -999                                                                                         missing
+# NOT USE - 0                                                                                        no, died
+# USE - 1                                                                                             yes
+# USE - 2                                                             yes, health treatment when possible
+# USE - 3                                                                        yes, no health treatment
+# USE - 4                                                yes, no health treatment, no commercial business
+# NOT USE - 5                                                          yes, no tissue, no commerical business
+# NOT USE - 6                      yes, no tissue, no questionnaires, no medical info, no commercial business
+# USE - 7                             yes, no questionnaires, no health treatment, no commercial business
+# USE - 8                                          yes, no questionnaires, health treatment when possible
+# NOT USE - 9                  yes, no tissue, no questionnaires, no health treatment, no commerical business
+# USE - 10                               yes, no health treatment, no medical info, no commercial business
+# NOT USE - 11 yes, no tissue, no questionnaires, no health treatment, no medical info, no commercial business
+# USE - 12                                                     yes, no questionnaires, no health treatment
+# NOT USE - 13                                                             yes, no tissue, no health treatment
+# NOT USE - 14                                                               yes, no tissue, no questionnaires
+# NOT USE - 15                                                  yes, no tissue, health treatment when possible
+# NOT USE - 16                                                                                  yes, no tissue
+# USE - 17                                                                     yes, no commerical business
+# USE - 18                                     yes, health treatment when possible, no commercial business
+# USE - 19                                                    yes, no medical info, no commercial business
+# USE - 20                                                                          yes, no questionnaires
+# NOT USE - 21                         yes, no tissue, no questionnaires, no health treatment, no medical info
+# NOT USE - 22                  yes, no tissue, no questionnaires, no health treatment, no commercial business
+# USE - 23                                                                            yes, no medical info
+# USE - 24                                                  yes, no questionnaires, no commercial business
+# USE - 25                                    yes, no questionnaires, no health treatment, no medical info
+# USE - 26                  yes, no questionnaires, health treatment when possible, no commercial business
+# USE - 27                                                      yes,  no health treatment, no medical info
+# NOT USE - 28                                                                             no, doesn't want to
+# NOT USE - 29                                                                              no, unable to sign
+# NOT USE - 30                                                                                 no, no reaction
+# NOT USE - 31                                                                                        no, lost
+# NOT USE - 32                                                                                     no, too old
+# NOT USE - 34                                            yes, no medical info, health treatment when possible
+# NOT USE - 35                                             no (never asked for IC because there was no tissue)
+# USE - 36                    yes, no medical info, no commercial business, health treatment when possible
+# NOT USE - 37                                                                                    no, endpoint
+# USE - 38                                                         wil niets invullen, wel alles gebruiken
+# USE - 39                                           second informed concents: yes, no commercial business
+# NOT USE - 40                                                                              nooit geincludeerd
+
+cat("- sanity checking PRIOR to selection")
+library(data.table)
+require(labelled)
+ae.gender <- to_factor(AEDB$Gender)
+ae.hospital <- to_factor(AEDB$Hospital)
+table(ae.gender, ae.hospital, dnn = c("Sex", "Hospital"))
+ae.artery <- to_factor(AEDB$Artery_summary)
+table(ae.artery, ae.gender, dnn = c("Sex", "Artery"))
+
+rm(ae.gender, ae.hospital, ae.artery)
+
+# I change numeric and factors manually because, well, I wouldn't know how to fix it otherwise
+# to have this 'tibble' work with 'tableone'... :-)
+
+AEDB$Age <- as.numeric(AEDB$Age)
+AEDB$diastoli <- as.numeric(AEDB$diastoli)
+AEDB$systolic <- as.numeric(AEDB$systolic)
+
+AEDB$TC_finalCU <- as.numeric(AEDB$TC_finalCU)
+AEDB$LDL_finalCU <- as.numeric(AEDB$LDL_finalCU)
+AEDB$HDL_finalCU <- as.numeric(AEDB$HDL_finalCU)
+AEDB$TG_finalCU <- as.numeric(AEDB$TG_finalCU)
+
+AEDB$TC_final <- as.numeric(AEDB$TC_final)
+AEDB$LDL_final <- as.numeric(AEDB$LDL_final)
+AEDB$HDL_final <- as.numeric(AEDB$HDL_final)
+AEDB$TG_final <- as.numeric(AEDB$TG_final)
+
+AEDB$Age <- as.numeric(AEDB$Age)
+AEDB$GFR_MDRD <- as.numeric(AEDB$GFR_MDRD)
+AEDB$BMI <- as.numeric(AEDB$BMI)
+AEDB$eCigarettes <- as.numeric(AEDB$eCigarettes)
+AEDB$ePackYearsSmoking <- as.numeric(AEDB$ePackYearsSmoking)
+AEDB$EP_composite_time <- as.numeric(AEDB$EP_composite_time)
+AEDB$EP_major_time <- as.numeric(AEDB$EP_major_time)
+
+require(labelled)
+AEDB$ORyear <- to_factor(AEDB$ORyear)
+AEDB$Gender <- to_factor(AEDB$Gender)
+AEDB$Hospital <- to_factor(AEDB$Hospital)
+AEDB$KDOQI <- to_factor(AEDB$KDOQI)
+AEDB$BMI_WHO <- to_factor(AEDB$BMI_WHO)
+AEDB$DiabetesStatus <- to_factor(AEDB$DiabetesStatus)
+AEDB$SmokerStatus <- to_factor(AEDB$SmokerStatus)
+AEDB$AlcoholUse <- to_factor(AEDB$AlcoholUse)
+
+AEDB$Hypertension.selfreport <- to_factor(AEDB$Hypertension1)
+AEDB$Hypertension.selfreportdrug <- to_factor(AEDB$Hypertension2)
+AEDB$Hypertension.composite <- to_factor(AEDB$Hypertension.composite)
+AEDB$Hypertension.drugs <- to_factor(AEDB$Hypertension.drugs)
+
+AEDB$Med.anticoagulants <- to_factor(AEDB$Med.anticoagulants)
+AEDB$Med.all.antiplatelet <- to_factor(AEDB$Med.all.antiplatelet)
+AEDB$Med.Statin.LLD <- to_factor(AEDB$Med.Statin.LLD)
+
+AEDB$Stroke_Dx <- to_factor(AEDB$Stroke_Dx)
+AEDB$CAD_history <- to_factor(AEDB$CAD_history)
+AEDB$PAOD <- to_factor(AEDB$PAOD)
+AEDB$Peripheral.interv <- to_factor(AEDB$Peripheral.interv)
+
+AEDB$sympt <- to_factor(AEDB$sympt)
+AEDB$Symptoms.3g <- to_factor(AEDB$Symptoms.3g)
+AEDB$Symptoms.4g <- to_factor(AEDB$Symptoms.4g)
+AEDB$Symptoms.5G <- to_factor(AEDB$Symptoms.5G)
+AEDB$AsymptSympt <- to_factor(AEDB$AsymptSympt)
+AEDB$AsymptSympt2G <- to_factor(AEDB$AsymptSympt2G)
+
+AEDB$restenos <- to_factor(AEDB$restenos)
+AEDB$stenose <- to_factor(AEDB$stenose)
+AEDB$EP_composite <- to_factor(AEDB$EP_composite)
+AEDB$EP_major <- to_factor(AEDB$EP_major)
+AEDB$Macrophages.bin <- to_factor(AEDB$Macrophages.bin)
+AEDB$SMC.bin <- to_factor(AEDB$SMC.bin)
+AEDB$IPH.bin <- to_factor(AEDB$IPH.bin)
+AEDB$Calc.bin <- to_factor(AEDB$Calc.bin)
+AEDB$Collagen.bin <- to_factor(AEDB$Collagen.bin)
+AEDB$Fat.bin_10 <- to_factor(AEDB$Fat.bin_10)
+AEDB$Fat.bin_40 <- to_factor(AEDB$Fat.bin_40)
+AEDB$OverallPlaquePhenotype <- to_factor(AEDB$OverallPlaquePhenotype)
+AEDB$Plaque_Vulnerability_Index <- to_factor(AEDB$Plaque_Vulnerability_Index)
+
+AEDB$Artery_summary <- to_factor(AEDB$Artery_summary)
+
+AEDB$informedconsent <- to_factor(AEDB$informedconsent)
+
+AEDB.CEA <- subset(AEDB,
+                    (Artery_summary == "carotid (left & right)" | Artery_summary == "other carotid arteries (common, external)") & # we only want carotids
+                       informedconsent != "missing" & # we are really strict in selecting based on 'informed consent'!
+                       informedconsent != "no, died" &
+                       informedconsent != "yes, no tissue, no commerical business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no medical info, no commercial business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commerical business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info, no commercial business" &
+                       informedconsent != "yes, no tissue, no health treatment" &
+                       informedconsent != "yes, no tissue, no questionnaires" &
+                       informedconsent != "yes, no tissue, health treatment when possible" &
+                       informedconsent != "yes, no tissue" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commercial business" &
+                       informedconsent != "no, doesn't want to" &
+                       informedconsent != "no, unable to sign" &
+                       informedconsent != "no, no reaction" &
+                       informedconsent != "no, lost" &
+                       informedconsent != "no, too old" &
+                       informedconsent != "yes, no medical info, health treatment when possible" &
+                       informedconsent != "no (never asked for IC because there was no tissue)" &
+                       informedconsent != "no, endpoint" &
+                       informedconsent != "nooit geincludeerd")
+# AEDB.CEA[1:10, 1:10]
+dim(AEDB.CEA)
+
+AEDB.full <- subset(AEDB,
+                    informedconsent != "missing" & # we are really strict in selecting based on 'informed consent'!
+                       informedconsent != "no, died" &
+                       informedconsent != "yes, no tissue, no commerical business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no medical info, no commercial business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commerical business" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info, no commercial business" &
+                       informedconsent != "yes, no tissue, no health treatment" &
+                       informedconsent != "yes, no tissue, no questionnaires" &
+                       informedconsent != "yes, no tissue, health treatment when possible" &
+                       informedconsent != "yes, no tissue" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info" &
+                       informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commercial business" &
+                       informedconsent != "no, doesn't want to" &
+                       informedconsent != "no, unable to sign" &
+                       informedconsent != "no, no reaction" &
+                       informedconsent != "no, lost" &
+                       informedconsent != "no, too old" &
+                       informedconsent != "yes, no medical info, health treatment when possible" &
+                       informedconsent != "no (never asked for IC because there was no tissue)" &
+                       informedconsent != "no, endpoint" &
+                       informedconsent != "nooit geincludeerd")
+# AEDB.CEA[1:10, 1:10]
+dim(AEDB.full)
+
+```
+
+
+```{r Baseline AEDB: creation}
+cat("===========================================================================================\n")
+cat("CREATE BASELINE TABLE\n")
+
+# Baseline table variables
+basetable_vars = c("Hospital", "ORyear",
+                   "Age", "Gender", 
+                   # "TC_finalCU", "LDL_finalCU", "HDL_finalCU", "TG_finalCU", 
+                   "TC_final", "LDL_final", "HDL_final", "TG_final", 
+                   # "hsCRP_plasma",
+                   "systolic", "diastoli", "GFR_MDRD", "BMI", 
+                   "KDOQI", "BMI_WHO",
+                   "SmokerStatus", "AlcoholUse",
+                   "DiabetesStatus", 
+                   "Hypertension.selfreport", "Hypertension.selfreportdrug", "Hypertension.composite", "Hypertension.drugs", 
+                   "Med.anticoagulants", "Med.all.antiplatelet", "Med.Statin.LLD", 
+                   "Stroke_Dx", "sympt", "Symptoms.5G", "AsymptSympt", "AsymptSympt2G",
+                   "restenos", "stenose",
+                   "CAD_history", "PAOD", "Peripheral.interv", 
+                   "EP_composite", "EP_composite_time", "EP_major", "EP_major_time",
+                   "MAC_rankNorm", "SMC_rankNorm", "Macrophages.bin", "SMC.bin",
+                   "Neutrophils_rankNorm", "MastCells_rankNorm",
+                   "IPH.bin", "VesselDensity_rankNorm",
+                   "Calc.bin", "Collagen.bin", 
+                   "Fat.bin_10", "Fat.bin_40", "OverallPlaquePhenotype", "Plaque_Vulnerability_Index")
+
+basetable_bin = c("Gender", 
+                  "KDOQI", "BMI_WHO",
+                  "SmokerStatus", "AlcoholUse",
+                  "DiabetesStatus", 
+                  "Hypertension.selfreport", "Hypertension.selfreportdrug", "Hypertension.composite", "Hypertension.drugs", 
+                  "Med.anticoagulants", "Med.all.antiplatelet", "Med.Statin.LLD", 
+                  "Stroke_Dx", "sympt", "Symptoms.5G", "AsymptSympt", "AsymptSympt2G",
+                  "restenos", "stenose",
+                  "CAD_history", "PAOD", "Peripheral.interv", 
+                  "EP_composite", "Macrophages.bin", "SMC.bin",
+                  "IPH.bin", 
+                  "Calc.bin", "Collagen.bin", 
+                  "Fat.bin_10", "Fat.bin_40", "OverallPlaquePhenotype", "Plaque_Vulnerability_Index")
+# basetable_bin
+
+basetable_con = basetable_vars[!basetable_vars %in% basetable_bin]
+# basetable_con
+```
+
+### Baseline characteristics
+Showing the baseline table of the whole Athero-Express Biobank.
+
+```{r Baseline AEDB: Visualize AEDB}
+# Create baseline tables
+# http://rstudio-pubs-static.s3.amazonaws.com/13321_da314633db924dc78986a850813a50d5.html
+AEDB.tableOne = print(CreateTableOne(vars = basetable_vars, 
+                                         # factorVars = basetable_bin,
+                                         # strata = "Symptoms.4g",
+                                         data = AEDB.full, includeNA = TRUE), 
+                          nonnormal = c(), missing = TRUE,
+                          quote = FALSE, noSpaces = FALSE, showAllLevels = TRUE, explain = TRUE, 
+                          format = "pf", 
+                          contDigits = 3)[,1:3]
+```
+
+
+```{r Baseline AEDB: Visualize AEDB CEA}
+# Create baseline tables
+# http://rstudio-pubs-static.s3.amazonaws.com/13321_da314633db924dc78986a850813a50d5.html
+AEDB.CEA.tableOne = print(CreateTableOne(vars = basetable_vars, 
+                                         # factorVars = basetable_bin,
+                                         # strata = "Symptoms.4g",
+                                         data = AEDB.CEA, includeNA = TRUE), 
+                          nonnormal = c(), missing = TRUE,
+                          quote = FALSE, noSpaces = FALSE, showAllLevels = TRUE, explain = TRUE, 
+                          format = "pf", 
+                          contDigits = 3)[,1:3]
+```
+
+
+## Athero-Express RNAseq Study
+
+Loading RNAseq data.
+
+```{r Load RNAseq}
+# bulk RNAseq data
+
+# used the first time
+# bulkRNA_counts <- fread(paste0(AERNA_loc, "/2019-12-11_bulk_RNAseq_data_to_share/bulk_RNAseq_raw_counts_corrected_for_UMI.txt"))
+bulkRNA_counts <- fread(paste0(AERNA_loc,"/2019-12-11_bulk_RNAseq_data_to_share/bulk_RNAseq_raw_counts_UMIcorr_weird_genes_filtered.txt"))
+
+# batch information
+bulkRNA_meta <- fread(paste0(AERNA_loc,"/2019-12-11_bulk_RNAseq_data_to_share/bulk_RNAseq_metadata.txt"))
+
+# fix study numbers
+bulkRNA_meta$study_number <- as.numeric(stringi::stri_replace_last_regex(bulkRNA_meta$study_number, "^ae*", ""))
+
+names(bulkRNA_counts) <- stringi::stri_replace_last_regex(names(bulkRNA_counts), "^ae*", "")
+
+```
+
+Quick peek at the counts and meta-data of the RNAseq experiment.
+
+```{r QuickPeek RNAseq}
+
+head(bulkRNA_counts)
+
+head(bulkRNA_meta)
+```
+
+
+We will parse the RNAseq data for downstream use.
+
+```{r Parsing RNAseq}
+AEDB.CEA.sampleList <- AEDB.CEA$STUDY_NUMBER
+# match up with meta data of RNAseq experiment
+bulkRNA_counts %<>%
+     drop_na(chr) %>%   # remove rows that have no information of start, end, chromosome and/or strand
+     dplyr::select(1:6, one_of(sort(as.character(AEDB.CEA.sampleList)))) # select gene expression of only patients in RNA-seq AE df, sort in same order as metadata study_number
+
+# Cut up bulkRNA_counts into 'assay' and 'ranges' part
+counts <- as.data.frame(bulkRNA_counts[,-(1:6)])              ## assay part
+rownames(counts) <- bulkRNA_counts$ensembl_gene_id               ## assign rownames
+bulkRNA_rowRanges <- GRanges(bulkRNA_counts$chr,					## construct a GRanges object containing 4 columns (seqnames, ranges, strand, seqinfo) plus a metadata colum (feature_id): this will be the 'rowRanges' bit
+                     IRanges(bulkRNA_counts$start, bulkRNA_counts$end),
+                     strand = bulkRNA_counts$strand,
+                     feature_id = bulkRNA_counts$ensembl_gene_id) #, df$pid)
+names(bulkRNA_rowRanges) <- bulkRNA_rowRanges$feature_id
+
+# ?org.Hs.eg.db
+# ?AnnotationDb
+
+bulkRNA_rowRanges$symbol <- mapIds(org.Hs.eg.db,
+                     keys = bulkRNA_rowRanges$feature_id,
+                     column = "SYMBOL",
+                     keytype = "ENSEMBL",
+                     multiVals = "first")
+
+# Reference: https://shiring.github.io/genome/2016/10/23/AnnotationDbi
+
+# gene dataframe for EnsDb.Hsapiens.v86
+gene_dataframe_EnsDb <- ensembldb::select(EnsDb.Hsapiens.v86, keys = bulkRNA_rowRanges$feature_id,
+                                          columns = c("ENTREZID", "SYMBOL", "GENEBIOTYPE"), keytype = "GENEID")
+colnames(gene_dataframe_EnsDb) <- c("Ensembl", "Entrez", "HGNC", "GENEBIOTYPE")
+colnames(gene_dataframe_EnsDb) <- paste(colnames(gene_dataframe_EnsDb), "EnsDb86", sep = "_")
+head(gene_dataframe_EnsDb)
+
+
+bulkRNA_rowRanges$GENEBIOTYPE_EnsDb86 <- gene_dataframe_EnsDb$GENEBIOTYPE_EnsDb86[match(bulkRNA_rowRanges$feature_id, gene_dataframe_EnsDb$Ensembl_EnsDb86)]
+bulkRNA_rowRanges
+
+# merging the two dataframes by HGNC
+# bulkRNA_rowRangesHg19Ensemblb86 <- GRanges(merge(bulkRNA_rowRanges, gene_dataframe_EnsDb, by.x = "feature_id", by.y = "Ensembl_EnsDb86", sort = FALSE, all.x = TRUE))
+# names(bulkRNA_rowRangesHg19Ensemblb86) <- bulkRNA_rowRangesHg19Ensemblb86$feature_id
+# bulkRNA_rowRangesHg19Ensemblb86
+
+# temp <- as.data.frame(table(bulkRNA_rowRanges$GENEBIOTYPE_EnsDb86))
+# colnames(temp) <- c("GeneBiotype", "Count")
+# 
+# ggpubr::ggbarplot(temp, x = "GeneBiotype", y = "Count",
+#                   color = "GeneBiotype", fill = "GeneBiotype",
+#                   xlab = "gene type") + 
+#   theme(axis.text.x = element_text(angle = 45))
+# rm(temp)
+
+```
+
+```{r Parse ClinicalData RNAseq}
+# match up with meta data of RNAseq experiment
+bulkRNA_meta %<>%
+     dplyr::filter(study_number %in% AEDB.CEA.sampleList) # select gene expression of only patients in RNA-seq AE df, sort in same order as metadata study_number
+
+# combine meta data from experiment with clinical data
+bulkRNA_meta_clin <- merge(bulkRNA_meta, AEDB.CEA, by.x = "study_number", by.y = "STUDY_NUMBER",
+                           sort = FALSE, all.x = TRUE)
+
+bulkRNA_meta_clin %<>%
+  # mutate(macrophages = factor(macrophages, levels = c("no staining", "minor staining", "moderate staining", "heavy staining"))) %>% 
+  # mutate(smc = factor(smc, levels = c("no staining", "minor staining", "moderate staining", "heavy staining"))) %>% 
+  # mutate(calcification = factor(calcification, levels = c("no staining", "minor staining", "moderate staining", "heavy staining"))) %>% 
+  # mutate(collagen = factor(collagen, levels = c("no staining", "minor staining", "moderate staining", "heavy staining"))) %>% 
+  # mutate(fat = factor(fat, levels = c("no fat", "< 40% fat", "> 40% fat"))) %>% 
+  mutate(study_number_row = study_number) %>%
+  as.data.frame() %>%
+  column_to_rownames("study_number_row")
+
+head(bulkRNA_meta_clin)
+dim(bulkRNA_meta_clin)
+
+```
+
+We make a `SummarizedExperiment` for the RNAseq data.
+
+```{r RNAseq to SE}
+cat("* loading data ...\n")
+
+# this is all the data passing RNAseq quality control
+# - includes 654 patients
+# - after filtering on informed consent, the end sample size should be 632
+AERNA_UMIcorr <- bulkRNA_counts
+
+# cat("* head of the update data ...\n")
+# DT::datatable(head(AERNA_UMIcorr))
+
+cat("\n* making a SummarizedExperiment ...")
+temp <- matrix(as.numeric(unlist(AERNA_UMIcorr[7:628])), 
+               nrow = nrow(AERNA_UMIcorr), # number of features in the assay, i.e. genes, probes, etc
+               ncol = ncol(AERNA_UMIcorr[,7:628]), # number of samples
+               byrow = TRUE,
+               dimnames = list(c(AERNA_UMIcorr$ensembl_gene_id), c(names(AERNA_UMIcorr[,7:628]))) )
+# str(temp)
+temp_coldat <- data.frame(STUDY_NUMBER = names(AERNA_UMIcorr[,7:628]), 
+                          SampleType = "plaque", RNAseqType = "3' RNAseq", 
+                          row.names = names(AERNA_UMIcorr[,7:628]))
+
+
+AERNA_UMIcorrSE <- SummarizedExperiment(assays = temp, colData = temp_coldat, rowRanges = bulkRNA_rowRanges)
+AERNA_UMIcorrSE
+cat("\n* removing intermediate files ...\n")
+rm(temp, temp_coldat)
+
+```
+
+## Athero-Express Methylation Study
+
+Loading the *Athero-Express Methylation Study* datasets (*AEMS450K1* and *AEMS450K2*).
+
+```{r AEMS450K: Loading data}
+cat("\n  - loading B/Mvalues of plaque samples in AEMS450K1 ...")
+#load(paste0(AEMS450K1_loc,"/20180625.aems450k1.BvaluesQCIMPSE.plaque.RData"))
+load(paste0(AEMS450K1_loc,"/20180625.aems450k1.MvaluesQCIMPSE.plaque.RData"))
+
+cat("\n  - loading B/Mvalues of plaque samples in AEMS450K2 ...")
+#load(paste0(AEMS450K2_loc,"/20180625.aems450k2.BvaluesQCIMPSE.plaque.RData"))
+load(paste0(AEMS450K2_loc,"/20180625.aems450k2.MvaluesQCIMPSE.plaque.RData"))
+```
+
+### Update 
+
+We will use the [DNAmArray Workflow](https://molepi.github.io/DNAmArray_workflow)[^3] developed by the group of prof. dr. Bastiaan Heijmans to update our `SummarizedExperiment()`-objects. This will mask, *i.e.* remove, probes that are deemed problematic (see **Introduction**). 
+
+References: 
+
+- https://rpubs.com/zhouwanding/417953
+- https://zwdzwd.github.io/InfiniumAnnotation
+
+[^3]: Sinke L., van Iterson M., Cats D., BIOS Consortium, Slieker R., & Heijmans B.T. (2019) "DNAmArray: Streamlined workflow for the quality control, normalization, and analysis of Illumina methylation array data" [http://doi.org/10.5281/zenodo.3355292](http://doi.org/10.5281/zenodo.3355292).
+
+#### Masking files
+
+We load the various masking-files.
+
+##### Zhou et al.
+
+```{r Get MaskingZhou}
+
+hm450.hg19.manifest.180909 <- readRDS(file = url("http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg19.manifest.rds"),
+        "rb") 
+
+head(hm450.hg19.manifest.180909)
+```
+
+**Column Legends**
+
+- *seqnames, start and end* - the location of the target (1-based coordinates, 2 nucleotides for CpG probes, or 1 nucleotide for CpH and SNP probes). strand is left as "*" always. Some erroneous CpH probe coordinates mapping information in the manufacturer's manifest have been corrected. SNP probe coordinates are provided. 
+- *strand* - This is consistent with "orientation" column for strand information of the actual probe. '+' is for all the up-probes positioned in smaller coordinates and '-' for all the down-probes positioned in greater coordinates with respect to the target CpGs.
+- *address_A and address_B* - addresses of probe A and B on the chip designated by the original manifest. 
+- *channel* - "Both" for type II probes and "Grn"/"Red" for type I probes. 
+- *designType* - either "I" or "II". 
+- *nextBase* - the actual extension base (on the probe strand) after bisulfite conversion ("A" or "C" or "T"). Unmapped probe has extension base labeled in the original manifest. 
+- *nextBaseRef* - the extension base (on the hybridized DNA) before bisulfite conversion ("A", "C", "G" or "T"). Unmapped probe has "NA". 
+- *probeType* - either "cg", "ch" or "rs". 
+- *orientation* - either "up" or "down" specifying whether the probe is positioned upstream (in smaller coordinates) or downstream (in greater coordinates) the target. 
+Note that by design, probes positioned upstream (in smaller coordinates) are always on the Watson strand and probes positioned downstream (in greater coordinates) are always on the Crick strand.
+- *probeCpGcnt* - the number of additional CpGs in the probe (not counting the interrogated CpG). 
+- *context35* - the number of CpG in the [-35bp, +35bp] window. 
+- *probeStart and probeEnd* - the mapped start and end position of the probe, it is always 50bp long. 
+- *ProbeSeq_A and ProbeSeq_B* - the probe sequence for allele A and B.
+- *gene* - ";"-separated list of gene annotations (unique and alphabetically sorted). Gene models follows GENCODE version 22 (hg38). 
+- *gene_HGNC* - ";"-separated list of gene annotations (unique and alphabetically sorted). Genes are checked using HGNChelper for compatibility with HGNC. Gene models follows GENCODE version 22 (hg38). 
+- *chrm_A, beg_A, flag_A, mapQ_A, cigar_A, NM_A* - the mapping info for probe A excluding decoy chromsomes. mapQ=mapping quality score, 0-60, with 60 being the best.
+- *chrm_B, beg_B, flag_B, mapQ_B, cigar_B, NM_B* - the mapping info for probe B excluding decoy chromosomes, like above.
+- *wDecoy_chrm_A, wDecoy_beg_A, wDecoy_mapQ_A, wDecoy_cigar_A, wDecoy_NM_A* - the mapping info for probe A including decoy chromosomes.
+- *wDecoy_chrm_B, wDecoy_beg_B, wDecoy_mapQ_B, wDecoy_cigar_B, wDecoy_NM_B* - the mapping info for probe B including decoy chromosomes.
+- *posMatch* - whether the mapping matches the original manifest, it only applies to hg19 and will be NA under hg38. 
+
+Several masking columns indicate the different levels of 'masking', *i.e.* filtering, that could be applied.
+
+- *MASK.mapping* - whether the probe is masked for mapping reason. Probes retained should have high quality (>=40 on 0-60 scale) consistent (with designed MAPINFO) mapping (for both in the case of type I) without INDELs. 
+- *MASK.typeINextBaseSwitch* - whether the probe has a SNP in the extension base that causes a color channel switch from the official annotation (described as color-channel-switching, or CCS SNP in the reference). These probes should be processed differently than designed (by summing up both color channels instead of just the annotated color channel). 
+- *MASK.rmsk15* - whether the 15bp 3'-subsequence of the probe overlap with repeat masker, this MASK is NOT recommended. 
+- *MASK.sub25.copy, MASK.sub30.copy, MASK.sub35.copy and MASK.sub40.copy* - whether the 25bp, 30bp, 35bp and 40bp 3'-subsequence of the probe is non-unique. 
+- *MASK.snp5.common* - whether 5bp 3'-subsequence (including extension for typeII) overlap with any of the common SNPs from dbSNP (global MAF can be under 1%). 
+- *MASK.snp5.GMAF1p* - whether 5bp 3'-subsequence (including extension for typeII) overlap with any of the SNPs with global MAF >1%. 
+- *MASK.extBase* - probes masked for extension base inconsistent with specified color channel (type-I) or CpG (type-II) based on mapping. 
+- *MASK.general* - recommended general purpose masking merged from "MASK.sub30.copy", "MASK.mapping", "MASK.extBase", "MASK.typeINextBaseSwitch" and "MASK.snp5.GMAF1p". 
+
+##### Naeem et al.
+In addition there is another paper by Naeem et al. suggesting to be even more stringent. They propose to filter using the following criteria:
+
+
+This should be done *prior* to performing methylation quantitative trait loci (mQTL) analyses, but also for differential methylation or epigenome-wide association studies (EWAS). 
+
+```{r Get MaskingNaeem}
+
+hm450.hg19.manifest.naeem <- read.csv(url("https://static-content.springer.com/esm/art%3A10.1186%2F1471-2164-15-51/MediaObjects/12864_2013_7006_MOESM2_ESM.csv"))
+
+head(hm450.hg19.manifest.naeem)
+
+hm450.hg19.manifest.naeem.list <- hm450.hg19.manifest.naeem[!is.na(hm450.hg19.manifest.naeem$Flag.discard.keep.) &
+                                                     hm450.hg19.manifest.naeem$Flag.discard.keep. == "discard", ]
+
+```
+
+
+**Legend** 
+
+1. *Probe* This column contains the probe ID as provided by Illumina.
+2. *SNP+INDEL_count* This column gives the total number of known SNPs (dbSNP ver135) and INDELs overlapping the probe region. Multiple SNPs that mapped to same location counted as 1.
+3. *Flag(discard/keep)* This column contains the word ‘discard’ or ‘keep’. The word “keep” indicates that the given probe is recommended for subsequent analysis, whereas the word “discard” means that the probe is recommended to be removed from the subsequent analysis.
+4. *MultiMap* This column contains value of either 1 or 0. The value of “1” indicates that the corresponding probe hybridizes to multiple genomic loci whereas the value of “0” represents that the probe maps to unique genomic loci.
+5. *Indels* This column provides the total number of INDELs which reside in the region hybridized by the probe.
+6. *SNP-at-CpG* This column holds value of either 1 or 0. The value of “1” indicates that the given probe mapped to sequence with the SNP at the interrogated CpG whereas the value of "0" represents that the probe does not contain any SNP at the interrogated CpG site.
+7. *Repeat* This column contains the value of either 1 or 0. The value of “1” illustrates that the probe spans a region in the genome containing repeat sequence elements whereas the value of “0” represents that the probe hybridizes to non-repeat regions.
+8. *WGBS_HM450K_GT_0.3* This column contains the value of either 1 or 0. The value of 1 represents that, for a given probe, the absolute beta difference between whole-genome bisulfite sequencing (WGBS) and Illumina HumanMethylation450 (HM450K) bead array is greater than 0.3 while the value of 0 shows that the probe holds absolute beta difference (WGBS-HM450K) less than or equal to 0.3.
+9. *ProbeType* This column contains the character(s) I or II. The character ‘I’ indicates that the probe is of Infinium I type where as a character of ‘II’ indicates that the given probe is of Infinium II type.
+10. *BisOK* This column provides the total number of SNPs that were okay in bisulfite-treated genome.
+
+##### GoNL
+
+Through above lists, probes with (common) SNPs (MAF > 1%) are removed. However, there are also variants specific to the Dutch population discovered through [GoNL](https://rdrr.io/bioc/omicsPrint/man/hm450.manifest.pop.GoNL.html)[^4]. We load this list here.
+
+[^4]: Van Iterson M., Cats D., Hop P., and Heijmans B.T. 2018. "OmicsPrint: Detection of Data Linkage Errors in Multiple Omics Studies." Edited by Oliver Stegle. [Bioinformatics 34 (12) (June): 2142–2143](https://academic.oup.com/bioinformatics/article/34/12/2142/4840579). DOI:10.1093/bioinformatics/bty062.
+
+
+```{r Remove CpG-probes with SNPs}
+data(hm450.manifest.pop.GoNL) ##From DNAmArray
+#hm450.manifest.pop.GoNL
+hm450.manifest.pop.GoNL <- hm450.manifest.pop.GoNL[!is.na(hm450.manifest.pop.GoNL$MASK.general.GoNL) &
+                                                     hm450.manifest.pop.GoNL$MASK.general.GoNL == TRUE, ]
+```
+
+A GRanges object with 485577 ranges and 65 metadata columns:
+
+- *MASK.general.pop* - Recommended general purpose masking merged from "MASK.sub30.copy", "MASK.mapping" (in either the hg38 or hg19 genome), "MASK.extBase", "MASK.typeINextBaseSwitch" and "MASK.snp5.pop" from the "hm450.manifest" file and the "hm450.manifest.pop" file (see source).For GoNL, "MASK.typeINextBaseSwitchandINDEL.GoNL" is used instead of "MASK.typeINextBaseSwitch"
+- *MASK.snp5.pop* - Whether the 5bp 3'-subsequence (including extension for type II) overlap with a SNP with population-specific AF > 0.01
+- *MASK.typeINextBaseSwitchandINDEL.GoNL* - SNPs (that cause a color-channel switch) and INDELS with AF > 0.01 in GoNL. In contrast, "MASK.typeINextBaseSwitch" column is based on all SNPs in 1000 genomes and dbSNP, regardless of population or allele frequency
+
+
+#### Filtering
+
+##### Problematic probes
+
+Remove problematic probes.
+```{r Remove ProblematicProbes}
+# cat("Processing B-value datasets ...\n")
+# cat("* plaque\n")
+# dim(aems450k1.BvaluesQCIMPplaqueSE)
+# aems450k1.BvaluesQCIMPplaqueSE.new <- DNAmArray::probeMasking(aems450k1.BvaluesQCIMPplaqueSE, 
+#                                                               array = "450", genome = "hg19", 
+#                                                               verbose = TRUE)
+# dim(aems450k1.BvaluesQCIMPplaqueSE.new)
+# 
+# cat("* blood\n")
+# dim(aems450k1.BvaluesQCIMPbloodSE)
+# aems450k1.BvaluesQCIMPbloodSE.new <- DNAmArray::probeMasking(aems450k1.BvaluesQCIMPbloodSE, 
+#                                                               array = "450", genome = "hg19", 
+#                                                               verbose = TRUE)
+# dim(aems450k1.BvaluesQCIMPbloodSE.new)
+# 
+# cat("* plaque\n")
+# dim(aems450k2.BvaluesQCIMPplaqueSE)
+# aems450k2.BvaluesQCIMPplaqueSE.new <- DNAmArray::probeMasking(aems450k2.BvaluesQCIMPplaqueSE, 
+#                                                               array = "450", genome = "hg19", 
+#                                                               verbose = TRUE)
+# dim(aems450k2.BvaluesQCIMPplaqueSE.new)
+
+cat("Processing M-value datasets ...\n")
+cat("* plaque\n")
+dim(aems450k1.MvaluesQCIMPplaqueSE)
+aems450k1.MvaluesQCIMPplaqueSE.new <- DNAmArray::probeMasking(aems450k1.MvaluesQCIMPplaqueSE, 
+                                                              array = "450", genome = "hg19", 
+                                                              verbose = TRUE)
+dim(aems450k1.MvaluesQCIMPplaqueSE.new)
+
+# cat("* blood\n")
+# dim(aems450k1.MvaluesQCIMPbloodSE)
+# aems450k1.MvaluesQCIMPbloodSE.new <- DNAmArray::probeMasking(aems450k1.MvaluesQCIMPbloodSE, 
+#                                                               array = "450", genome = "hg19", 
+#                                                               verbose = TRUE)
+# dim(aems450k1.MvaluesQCIMPbloodSE.new)
+
+cat("* plaque\n")
+dim(aems450k2.MvaluesQCIMPplaqueSE)
+aems450k2.MvaluesQCIMPplaqueSE.new <- DNAmArray::probeMasking(aems450k2.MvaluesQCIMPplaqueSE, 
+                                                              array = "450", genome = "hg19", 
+                                                              verbose = TRUE)
+dim(aems450k2.MvaluesQCIMPplaqueSE.new)
+
+```
+
+##### Additional probes
+
+Remove additional CpGs flagged for being problematic.
+```{r Remove Additional CpGs AEMS450K1 and AEMS450K2}
+# cat("Processing B-value datasets ...\n")
+# cat("* plaque\n")
+# aems450k1.BvaluesQCIMPplaqueSE.new2 <- aems450k1.BvaluesQCIMPplaqueSE.new[!(names(aems450k1.BvaluesQCIMPplaqueSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+# dim(aems450k1.BvaluesQCIMPplaqueSE.new2)
+# 
+# cat("* blood\n")
+# aems450k1.BvaluesQCIMPbloodSE.new2 <- aems450k1.BvaluesQCIMPbloodSE.new[!(names(aems450k1.BvaluesQCIMPbloodSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+# dim(aems450k1.BvaluesQCIMPbloodSE.new2)
+# 
+# cat("* plaque\n")
+# aems450k2.BvaluesQCIMPplaqueSE.new2 <- aems450k2.BvaluesQCIMPplaqueSE.new[!(names(aems450k2.BvaluesQCIMPplaqueSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+# dim(aems450k2.BvaluesQCIMPplaqueSE.new2)
+
+cat("Processing M-value datasets ...\n")
+cat("* plaque\n")
+aems450k1.MvaluesQCIMPplaqueSE.new2 <- aems450k1.MvaluesQCIMPplaqueSE.new[!(names(aems450k1.MvaluesQCIMPplaqueSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+dim(aems450k1.MvaluesQCIMPplaqueSE.new2)
+
+# cat("* blood\n")
+# aems450k1.MvaluesQCIMPbloodSE.new2 <- aems450k1.MvaluesQCIMPbloodSE.new[!(names(aems450k1.MvaluesQCIMPbloodSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+# dim(aems450k1.MvaluesQCIMPbloodSE.new2)
+
+cat("* plaque\n")
+aems450k2.MvaluesQCIMPplaqueSE.new2 <- aems450k2.MvaluesQCIMPplaqueSE.new[!(names(aems450k2.MvaluesQCIMPplaqueSE.new) %in% hm450.hg19.manifest.naeem.list$probe),]
+dim(aems450k2.MvaluesQCIMPplaqueSE.new2)
+
+# rm(aems450k1.BvaluesQCIMPplaqueSE.new, aems450k1.MvaluesQCIMPplaqueSE.new,
+#    aems450k1.BvaluesQCIMPbloodSE.new, aems450k1.MvaluesQCIMPbloodSE.new,
+#    aems450k2.BvaluesQCIMPplaqueSE.new, aems450k2.MvaluesQCIMPplaqueSE.new)
+
+rm(aems450k1.MvaluesQCIMPplaqueSE.new,
+   aems450k2.MvaluesQCIMPplaqueSE.new)
+
+
+```
+
+
+##### GoNL
+Remove CpGs with GoNL SNPs AEMS450K1 and AEMS450K2.
+```{r Remove CpGs with GoNL SNPs AEMS450K1 and AEMS450K2}
+# cat("Processing B-value datasets ...\n")
+# cat("* plaque\n")
+# aems450k1.BvaluesQCIMPplaqueSECLEAN <- aems450k1.BvaluesQCIMPplaqueSE.new2[!(names(aems450k1.BvaluesQCIMPplaqueSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+# dim(aems450k1.BvaluesQCIMPplaqueSECLEAN)
+# 
+# cat("* blood\n")
+# aems450k1.BvaluesQCIMPbloodSECLEAN <- aems450k1.BvaluesQCIMPbloodSE.new2[!(names(aems450k1.BvaluesQCIMPbloodSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+# dim(aems450k1.BvaluesQCIMPbloodSECLEAN)
+# 
+# cat("* plaque\n")
+# aems450k2.BvaluesQCIMPplaqueSECLEAN <- aems450k2.BvaluesQCIMPplaqueSE.new2[!(names(aems450k2.BvaluesQCIMPplaqueSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+# dim(aems450k2.BvaluesQCIMPplaqueSECLEAN)
+
+cat("Processing M-value datasets ...\n")
+cat("* plaque\n")
+aems450k1.MvaluesQCIMPplaqueSECLEAN <- aems450k1.MvaluesQCIMPplaqueSE.new2[!(names(aems450k1.MvaluesQCIMPplaqueSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+dim(aems450k1.MvaluesQCIMPplaqueSECLEAN)
+
+# cat("* blood\n")
+# aems450k1.MvaluesQCIMPbloodSECLEAN <- aems450k1.MvaluesQCIMPbloodSE.new2[!(names(aems450k1.MvaluesQCIMPbloodSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+# dim(aems450k1.MvaluesQCIMPbloodSECLEAN)
+
+cat("* plaque\n")
+aems450k2.MvaluesQCIMPplaqueSECLEAN <- aems450k2.MvaluesQCIMPplaqueSE.new2[!(names(aems450k2.MvaluesQCIMPplaqueSE.new2) %in% names(hm450.manifest.pop.GoNL)),]
+dim(aems450k2.MvaluesQCIMPplaqueSECLEAN)
+
+# rm(aems450k1.BvaluesQCIMPplaqueSE.new2, aems450k1.MvaluesQCIMPplaqueSE.new2,
+#    aems450k1.BvaluesQCIMPbloodSE.new2, aems450k1.MvaluesQCIMPbloodSE.new2,
+#    aems450k2.BvaluesQCIMPplaqueSE.new2, aems450k2.MvaluesQCIMPplaqueSE.new2)
+
+rm(aems450k1.MvaluesQCIMPplaqueSE.new2,
+   aems450k2.MvaluesQCIMPplaqueSE.new2)
+
+
+```
+
+
+We started with:
+```{r Probes & Samples Input}
+dim(aems450k1.MvaluesQCIMPplaqueSE)  # 483,731 CpGs, 485 samples
+# dim(aems450k1.MvaluesQCIMPbloodSE)  # 483,731 CpGs, 93 samples
+dim(aems450k2.MvaluesQCIMPplaqueSE)  # 484,249 CpGs, 190 samples
+# rowRanges(aems450k1.MvaluesQCplaqueClean)
+```
+
+...and we end up with:
+```{r Probes & Samples Output}
+dim(aems450k1.MvaluesQCIMPplaqueSECLEAN)  # 276,373 CpGs, 485 samples
+# dim(aems450k1.MvaluesQCIMPbloodSECLEAN)  # 276,373 CpGs, 93 samples
+dim(aems450k2.MvaluesQCIMPplaqueSECLEAN)  # 276,450 CpGs, 190 samples
+# rowRanges(aems450k2.MvaluesQCplaqueClean)
+```
+
+### Annotations
+
+#### Load Annotations
+Annotating *AEMS450K* data.
+```{r LoadAnnotations}
+cat("\n * Annotating data with additional CpG information.")
+cat("\n   - annotating...")
+# plaque
+# install.packages.auto("IlluminaHumanMethylation450kmanifest")
+# install.packages.auto("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+# ?IlluminaHumanMethylation450kmanifest
+# data(IlluminaHumanMethylation450kmanifest)
+# IlluminaHumanMethylation450kmanifest
+# ?IlluminaHumanMethylation450kanno.ilmn12.hg19
+data(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+IlluminaHumanMethylation450kanno.ilmn12.hg19
+# data(Locations)
+# data(Manifest)
+# data(SNPs.137CommonSingle)
+data(Islands.UCSC)
+# data(Other)
+# Locations
+# Manifest
+# SNPs.137CommonSingle
+# Islands.UCSC
+# Other
+
+Islands.UCSC.forannotate <- as.data.frame(Islands.UCSC)
+Islands.UCSC.forannotate$CpG <- rownames(Islands.UCSC.forannotate)
+Other.forannotate <- as.data.frame(Other)
+```
+
+We loaded the annotations, now we will re-annotate the data.
+```{r Annotating}
+cat("\n  - annotating B/Mvalues of plaque and blood samples in AEMS450K1 ...")
+# # B-values
+# rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+# rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+# rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN), Other.forannotate, by = "row.names")
+# rowData(aems450k1.BvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+# 
+# rowData(aems450k1.BvaluesQCIMPbloodSECLEAN) <- merge(rowData(aems450k1.BvaluesQCIMPbloodSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+# rowData(aems450k1.BvaluesQCIMPbloodSECLEAN)$Row.names <- NULL
+# rowData(aems450k1.BvaluesQCIMPbloodSECLEAN) <- merge(rowData(aems450k1.BvaluesQCIMPbloodSECLEAN), Other.forannotate, by = "row.names")
+# rowData(aems450k1.BvaluesQCIMPbloodSECLEAN)$Row.names <- NULL
+
+# M-values
+rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN), Other.forannotate, by = "row.names")
+rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+
+# rowData(aems450k1.MvaluesQCIMPbloodSECLEAN) <- merge(rowData(aems450k1.MvaluesQCIMPbloodSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+# rowData(aems450k1.MvaluesQCIMPbloodSECLEAN)$Row.names <- NULL
+# rowData(aems450k1.MvaluesQCIMPbloodSECLEAN) <- merge(rowData(aems450k1.MvaluesQCIMPbloodSECLEAN), Other.forannotate, by = "row.names")
+# rowData(aems450k1.MvaluesQCIMPbloodSECLEAN)$Row.names <- NULL
+
+cat("\n  - annotating B/Mvalues of plaque samples in AEMS450K2 ...")
+# # B-values
+# rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+# rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+# rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN), Other.forannotate, by = "row.names")
+# rowData(aems450k2.BvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+
+# M-values
+rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN), Islands.UCSC.forannotate, by = "row.names")
+rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN) <- merge(rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN), Other.forannotate, by = "row.names")
+rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN)$Row.names <- NULL
+
+rm(Islands.UCSC.forannotate, Other.forannotate, Islands.UCSC)
+```
+
+```{r SubsetAnnotations}
+dim(aems450k1.MvaluesQCIMPplaqueSECLEAN)
+dim(aems450k2.MvaluesQCIMPplaqueSECLEAN)
+
+infobcp <- cpgInfo(rownames(rowData(aems450k1.MvaluesQCIMPplaqueSE)), TxDb = "TxDb.Hsapiens.UCSC.hg19.knownGene")
+
+infobcp$CpG <- rownames(infobcp)
+
+cat("\n * Getting a table with annotations ...")
+DT::datatable(head(infobcp))
+
+
+# head(infobcp)
+infobcp$CpG <- rownames(infobcp)
+
+infobcp_sub <- subset(infobcp, SYMBOL == "IRAK4" | SYMBOL == "PUS7L" 
+                      | SYMBOL == "CDKN2B-AS1" | SYMBOL == "CDKN2A" | SYMBOL == "CDKN2B" 
+                      | CpG == "cg20461126")
+
+cat("\n * Getting a table with annotations ...")
+DT::datatable(infobcp_sub)
+
+
+```
+
+
+
+### MultiAssayExperiment
+Combining RNAseq with AEMS450K1 in one `MultiAssayExperiment` dataset[^3]. First, we will make a list of overlapping samples.
+
+[^3]: Reference: http://waldronlab.io/MultiAssayExperiment/articles/MultiAssayExperiment.html
+
+#### SampleMaps
+```{r MultiAssayExperiment: sampleMaps}
+cat("* Creating sample lists of the AEMS450K datasets ...")
+temp <- as.data.frame(colData(aems450k1.MvaluesQCIMPplaqueSECLEAN))
+temp.cols <- colnames(temp)[c(922:946)]
+aems450k1_sampleList <- subset(temp, select = c("STUDY_NUMBER", "AEMS450K", "AEMS450K_SampleType", "SAMPLE_TYPE_AES450K",
+                                         temp.cols))
+
+temp <- as.data.frame(colData(aems450k2.MvaluesQCIMPplaqueSECLEAN))
+temp.cols <- colnames(temp)[c(922:946)]
+aems450k2_sampleList <- subset(temp, select = c("STUDY_NUMBER", "AEMS450K", "AEMS450K_SampleType", "SAMPLE_TYPE_AES450K",
+                                         temp.cols))
+rm(temp, temp.cols)
+
+cat("* Creating sample lists of the AERNA dataset ...")
+temp <- as.data.frame(colData(AERNA_UMIcorrSE))
+aerna_sampleList <- subset(temp, select = c("STUDY_NUMBER", "SampleType", "RNAseqType"))
+rm(temp)
+
+cat("* Creating sampleMaps of the AEMS450K and AERNA datasets ...")
+aems450K1_map <- data.frame(primary = aems450k1_sampleList$STUDY_NUMBER,
+                           colname = aems450k1_sampleList$ID,
+                           stringsAsFactors = FALSE)
+aems450K2_map <- data.frame(primary = aems450k2_sampleList$STUDY_NUMBER,
+                           colname = aems450k2_sampleList$ID,
+                           stringsAsFactors = FALSE)
+
+aerna_map <- data.frame(primary = AERNA_UMIcorrSE$STUDY_NUMBER,
+                        colname = AERNA_UMIcorrSE$STUDY_NUMBER,
+                        stringsAsFactors = FALSE)
+
+cat("* Creating lists and a dataframe of sampleMaps ...")
+listmap <- list(aems450K1_map, aems450K2_map, aerna_map)
+names(listmap) <- c("AEMS450K1", "AEMS450K2", "AERNA")
+listmap
+
+dfmap <- listToMap(listmap)
+dfmap
+
+```
+
+#### Assays
+
+Collecting the various assay data in an `object list`. We will create two new objects for the methylation data, to drop
+```{r MultiAssayExperiment: data}
+
+AEMS450K1.SE.assay <- assay(aems450k1.MvaluesQCIMPplaqueSECLEAN)
+AEMS450K1.SE.rowData <- rowData(aems450k1.MvaluesQCIMPplaqueSECLEAN)
+AEMS450K1.SE.metadata <- metadata(aems450k1.MvaluesQCIMPplaqueSECLEAN)
+
+AEMS450K1.SE <- SummarizedExperiment(assays = AEMS450K1.SE.assay, 
+                                     rowData = AEMS450K1.SE.rowData,
+                                     colData = aems450k1_sampleList,
+                                     metadata = AEMS450K1.SE.metadata)
+
+AEMS450K2.SE.assay <- assay(aems450k2.MvaluesQCIMPplaqueSECLEAN)
+AEMS450K2.SE.rowData <- rowData(aems450k2.MvaluesQCIMPplaqueSECLEAN)
+AEMS450K2.SE.metadata <- metadata(aems450k2.MvaluesQCIMPplaqueSECLEAN)
+
+AEMS450K2.SE <- SummarizedExperiment(assays = AEMS450K2.SE.assay, 
+                                     rowData = AEMS450K2.SE.rowData,
+                                     colData = aems450k2_sampleList,
+                                     metadata = AEMS450K2.SE.metadata)
+
+objlist <- list("AEMS450K1" = AEMS450K1.SE, 
+                "AEMS450K2" = AEMS450K2.SE,
+                "AERNA" = AERNA_UMIcorrSE)
+
+```
+
+#### Clinical data
+
+Editing the clinical data to match the `MultiAssayExperiment` format.
+```{r Create New AEDB}
+AEDB_all <- as.data.frame(subset(AEDB.CEA, select = c("STUDY_NUMBER", "UPID", "informedconsent", "Hospital", "Artery_summary",
+                                                  "Age", "Gender",
+                                                  "TC_final", "LDL_final", "HDL_final", "TG_final", 
+                                                  "systolic", "diastoli", "GFR_MDRD", "BMI", 
+                                                  "KDOQI", "BMI_WHO",
+                                                  "SmokerStatus", 
+                                                  "DiabetesStatus", 
+                                                  "Hypertension.selfreport", "Hypertension.selfreportdrug",
+                                                  "Hypertension.composite", "Hypertension.drugs",
+                                                  "Med.anticoagulants", "Med.all.antiplatelet", "Med.Statin.LLD", 
+                                                  "Symptoms.5G", "AsymptSympt", "restenos", 
+                                                  "EP_composite",
+                                                  "OverallPlaquePhenotype", "Plaque_Vulnerability_Index")))
+
+rownames(AEDB_all) <- AEDB_all$STUDY_NUMBER
+
+```
+
+#### Creation
+Finally ready to make our `MultiAssayExperiment` dataset.
+```{r MultiAssayExperiment: creation}
+cat("*Prepping and checking out the potential for a MultiAssayExperiment dataset ...")
+try(prepMultiAssay(ExperimentList = objlist, colData = AEDB_all, sampleMap = dfmap)$experiments,
+    outFile = stdout())
+
+cat("\n* Creating the MultiAssayExperiment ...")
+AE_MultiAssay <- MultiAssayExperiment(experiments = objlist,
+                                      colData = AEDB_all,
+                                      sampleMap = dfmap)
+AE_MultiAssay
+
+# rownames(AE_MultiAssay)
+# 
+# colnames(AE_MultiAssay)
+# 
+# assays(AE_MultiAssay)
+# 
+# str(AE_MultiAssay)
+
+rm(objlist)
+```
+
+#### Overlaps
+Now that we have a `MultiAssayExperiment`, we can inspect the overlap between datasets. 
+```{r MultiAssayExperiment: overlap}
+cat("*Visualizing the overlap ...")
+# Reference: https://cran.r-project.org/web/packages/UpSetR/vignettes/attribute.plots.html
+library(UpSetR)
+
+upsetSamples(AE_MultiAssay, main.bar.color = "#595A5C", sets.bar.color = "#595A5C", 
+             queries = list(list(query = intersects, params = list("AEMS450K1", "AERNA"), color = "#F59D10", active = TRUE),
+                            list(query = intersects, params = list("AEMS450K2", "AERNA"), color = "#E55738", active = TRUE),
+                            list(query = intersects, params = list("AEMS450K1"), color = "#9A3480", active = FALSE),
+                            list(query = intersects, params = list("AEMS450K2"), color = "#686AA9", active = FALSE),
+                            list(query = intersects, params = list("AERNA"), color = "#4C81BF", active = FALSE),
+                            list(query = intersects, params = list("AEMS450K1", "AEMS450K2", "AERNA"), 
+                                 color = "#1396D8", active = TRUE),
+                            list(query = intersects, params = list("AEMS450K1", "AEMS450K2"), 
+                                 color = "#9FC228", active = TRUE)))
+
+```
+
+
+#### Baseline Table
+
+```{r Baseline AE_MultiAssay: preparation}
+cat("====================================================================================================\n")
+cat("SELECTION THE SHIZZLE\n")
+
+cat("- sanity checking PRIOR to selection")
+library(data.table)
+ae.gender <- ifelse(AE_MultiAssay$Gender == 0, "Female", "Male")
+ae.hospital <- ifelse(AE_MultiAssay$Hospital == 1, "Antonius", "UMCU")
+table(ae.gender, ae.hospital, dnn = c("Sex", "Hospital"))
+ae.gender <- ifelse(AE_MultiAssay$Gender == 0, "Female", "Male")
+table(ae.gender, AE_MultiAssay$Artery_summary, dnn = c("Sex", "Artery"))
+# table(ae.gender, AE_MultiAssay$informedconsent, dnn = c("Sex", "IC"))
+
+rm(ae.gender, ae.hospital)
+
+# I change numeric and factors manually because, well, I wouldn't know how to fix it otherwise
+# to have this 'tibble' work with 'tableone'... :-)
+
+AE_MultiAssay$Age <- as.numeric(AE_MultiAssay$Age)
+AE_MultiAssay$diastoli <- as.numeric(AE_MultiAssay$diastoli)
+AE_MultiAssay$systolic <- as.numeric(AE_MultiAssay$systolic)
+AE_MultiAssay$GFR_MDRD <- as.numeric(AE_MultiAssay$GFR_MDRD)
+AE_MultiAssay$BMI <- as.numeric(AE_MultiAssay$BMI)
+
+require(labelled)
+AE_MultiAssay$Gender <- to_factor(AE_MultiAssay$Gender)
+AE_MultiAssay$Hospital <- to_factor(AE_MultiAssay$Hospital)
+AE_MultiAssay$KDOQI <- to_factor(AE_MultiAssay$KDOQI)
+AE_MultiAssay$BMI_WHO <- to_factor(AE_MultiAssay$BMI_WHO)
+AE_MultiAssay$DiabetesStatus <- to_factor(AE_MultiAssay$DiabetesStatus)
+AE_MultiAssay$SmokerStatus <- to_factor(AE_MultiAssay$SmokerStatus)
+AE_MultiAssay$Hypertension.selfreport <- to_factor(AE_MultiAssay$Hypertension.selfreport)
+AE_MultiAssay$Hypertension.selfreportdrug <- to_factor(AE_MultiAssay$Hypertension.selfreportdrug)
+AE_MultiAssay$Hypertension.composite <- to_factor(AE_MultiAssay$Hypertension.composite)
+AE_MultiAssay$Hypertension.drugs <- to_factor(AE_MultiAssay$Hypertension.drugs)
+AE_MultiAssay$Med.anticoagulants <- to_factor(AE_MultiAssay$Med.anticoagulants)
+AE_MultiAssay$Med.all.antiplatelet <- to_factor(AE_MultiAssay$Med.all.antiplatelet)
+AE_MultiAssay$Med.Statin.LLD <- to_factor(AE_MultiAssay$Med.Statin.LLD)
+
+AE_MultiAssay$Symptoms.5G <- to_factor(AE_MultiAssay$Symptoms.5G)
+AE_MultiAssay$AsymptSympt <- to_factor(AE_MultiAssay$AsymptSympt)
+
+AE_MultiAssay$restenos <- to_factor(AE_MultiAssay$restenos)
+AE_MultiAssay$EP_composite <- to_factor(AE_MultiAssay$EP_composite)
+AE_MultiAssay$OverallPlaquePhenotype <- to_factor(AE_MultiAssay$OverallPlaquePhenotype)
+AE_MultiAssay$Plaque_Vulnerability_Index <- to_factor(AE_MultiAssay$Plaque_Vulnerability_Index)
+AE_MultiAssay$informedconsent <- to_factor(AE_MultiAssay$informedconsent)
+AE_MultiAssay$Artery_summary <- to_factor(AE_MultiAssay$Artery_summary)
+
+
+# We also need to fix some variables
+
+attach(as.data.frame(colData(AE_MultiAssay)))
+colData(AE_MultiAssay)$KDOQI[KDOQI == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$BMI_WHO[BMI_WHO == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$SmokerStatus[SmokerStatus == "no data available/missing"] <- NA
+colData(AE_MultiAssay)$Hypertension.selfreport[Hypertension.selfreport == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Hypertension.selfreportdrug[Hypertension.selfreportdrug == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Hypertension.composite[Hypertension.composite == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Hypertension.drugs[Hypertension.drugs == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Med.anticoagulants[Med.anticoagulants == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Med.all.antiplatelet[Med.all.antiplatelet == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$Med.Statin.LLD[Med.Statin.LLD == "No data available/missing"] <- NA
+colData(AE_MultiAssay)$EP_composite[EP_composite == "No data available."] <- NA
+
+gdata::drop.levels(colData(AE_MultiAssay))
+
+detach(as.data.frame(colData(AE_MultiAssay)))
+
+AE_MultiAssay.CEA <- subset(AE_MultiAssay,
+                    (AE_MultiAssay$Artery_summary == "carotid (left & right)" | AE_MultiAssay$Artery_summary == "other carotid arteries (common, external)") & # we only want carotids
+                       AE_MultiAssay$informedconsent != "missing" & # we are really strict in selecting based on 'informed consent'!
+                       AE_MultiAssay$informedconsent != "no, died" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no commerical business" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires, no medical info, no commercial business" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commerical business" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info, no commercial business" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no health treatment" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, health treatment when possible" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires, no health treatment, no medical info" &
+                       AE_MultiAssay$informedconsent != "yes, no tissue, no questionnaires, no health treatment, no commercial business" &
+                       AE_MultiAssay$informedconsent != "no, doesn't want to" &
+                       AE_MultiAssay$informedconsent != "no, unable to sign" &
+                       AE_MultiAssay$informedconsent != "no, no reaction" &
+                       AE_MultiAssay$informedconsent != "no, lost" &
+                       AE_MultiAssay$informedconsent != "no, too old" &
+                       AE_MultiAssay$informedconsent != "yes, no medical info, health treatment when possible" &
+                       AE_MultiAssay$informedconsent != "no (never asked for IC because there was no tissue)" &
+                       AE_MultiAssay$informedconsent != "no, endpoint" &
+                       AE_MultiAssay$informedconsent != "nooit geincludeerd")
+# AE_MultiAssay.CEA[1:10, 1:10]
+dim(AE_MultiAssay.CEA)
+# AE_MultiAssay.CEA
+```
+
+```{r Baseline AE_MultiAssay: creation}
+cat("===========================================================================================\n")
+cat("CREATE BASELINE TABLE\n")
+
+# Baseline table variables
+
+basetable_vars = c("Hospital", "ORyear",
+                   "Age", "Gender", 
+                   "TC_final", "LDL_final", "HDL_final", "TG_final", 
+                   "systolic", "diastoli", "GFR_MDRD", "BMI", 
+                   "KDOQI", "BMI_WHO",
+                   "SmokerStatus", 
+                   "DiabetesStatus", 
+                   "Hypertension.selfreport", "Hypertension.selfreportdrug", "Hypertension.composite", "Hypertension.drugs", 
+                   "Med.anticoagulants", "Med.all.antiplatelet", "Med.Statin.LLD", 
+                   "Stroke_Dx", "sympt", "Symptoms.5G", "AsymptSympt", "AsymptSympt2G",
+                   "restenos", "stenose",
+                   "CAD_history", "PAOD", "Peripheral.interv", 
+                   "EP_composite", "EP_composite_time", "EP_major", "EP_major_time",
+                   "MAC_rankNorm", "SMC_rankNorm", "Macrophages.bin", "SMC.bin",
+                   "Neutrophils_rankNorm", "MastCells_rankNorm",
+                   "IPH.bin", "VesselDensity_rankNorm",
+                   "Calc.bin", "Collagen.bin", 
+                   "Fat.bin_10", "Fat.bin_40", "OverallPlaquePhenotype", "Plaque_Vulnerability_Index")
+
+basetable_bin = c("Gender", 
+                  "KDOQI", "BMI_WHO",
+                  "SmokerStatus", 
+                  "DiabetesStatus", 
+                  "Hypertension.selfreport", "Hypertension.selfreportdrug", "Hypertension.composite", "Hypertension.drugs", 
+                  "Med.anticoagulants", "Med.all.antiplatelet", "Med.Statin.LLD", 
+                  "Stroke_Dx", "sympt", "Symptoms.5G", "AsymptSympt", "AsymptSympt2G",
+                  "restenos", "stenose",
+                  "CAD_history", "PAOD", "Peripheral.interv", 
+                  "EP_composite", "Macrophages.bin", "SMC.bin",
+                  "IPH.bin", 
+                  "Calc.bin", "Collagen.bin", 
+                  "Fat.bin_10", "Fat.bin_40", "OverallPlaquePhenotype", "Plaque_Vulnerability_Index")
+
+# basetable_bin
+
+basetable_con = basetable_vars[!basetable_vars %in% basetable_bin]
+# basetable_con
+```
+
+#### Athero-Express Omics Studies: baseline characteristics
+Showing the baseline table of the whole Athero-Express Biobank.
+```{r Baseline AE_MultiAssay: Visualize}
+# Create baseline tables
+# http://rstudio-pubs-static.s3.amazonaws.com/13321_da314633db924dc78986a850813a50d5.html
+AE_MultiAssay.CEA.tableOne = print(CreateTableOne(vars = basetable_vars, 
+                                                  # factorVars = basetable_bin,
+                                                  strata = "AsymptSympt",
+                                                  data = as.data.frame(colData(AE_MultiAssay.CEA)), includeNA = TRUE), 
+                                   nonnormal = c(), missing = TRUE,
+                                   quote = FALSE, noSpaces = FALSE, showAllLevels = TRUE, explain = TRUE, 
+                                   format = "pf", 
+                                   contDigits = 3)[,1:7]
+
+```
+
+We can also save this for future reference.
+```{r AE_MultiAssay: Baseline SampleSelection: write}
+# Write basetable
+require(openxlsx)
+
+write.xlsx(file = paste0(BASELINE_loc, "/",Today,".",PROJECTNAME,".AE_MultiAssay.BaselineTable.xlsx"), 
+           AE_MultiAssay.CEA.tableOne, 
+           row.names = TRUE, 
+           col.names = TRUE, 
+           sheetName = "AE_MultiAssay_Baseline")
+
+```
+
+
+# MultiAssay Analysis {.tabset .tabset-fade .tabset-pills}
+
+Let's extract the data we need. 
+
+We will run two models:
+
+- Model 1: [gene-expression] ~ age + gender + Hospital
+- Model 2: [gene-expression] ~ age + gender + hospital + BMI + GFR_MDRD + hypertension + diabetes + lipid-lowering drugs
+
+```{r MultiAssayExperiment: selection subset}
+AE_MultiAssay.CEA
+
+bulkRNA_rowRanges_sub <- subset(bulkRNA_rowRanges, symbol == "IRAK4" | symbol == "PUS7L" | symbol == "CDKN2B-AS1" | symbol == "CDKN2A" | symbol == "CDKN2B")
+
+bulkRNA_rowRanges_sub
+
+AE_MultiAssay.CEA.sub <- AE_MultiAssay.CEA[c("ENSG00000198001", "ENSG00000129317", "ENSG00000147889", "ENSG00000147883", "ENSG00000240498", "cg20461126"), , ]
+
+AE_MultiAssay.CEA.sub
+```
+Please note that we work with EnsmeblIDs:
+
+ensembleID    chr    ranges    strand   feature_id    symbol    GENEBIOTYPE_EnsDb86
+ENSG00000198001   12    44152747-44183346      +    ENSG00000198001   IRAK4   protein_coding
+ENSG00000129317   12    44122410-44152620      -    ENSG00000129317   PUS7L   protein_coding
+ENSG00000147889   09    21967751-21995300      -    ENSG00000147889   CDKN2A    protein_coding
+ENSG00000147883   09    22002902-22009362      -    ENSG00000147883   CDKN2B    protein_coding
+ENSG00000240498   09    21994777-22121096      +    ENSG00000240498   CDKN2B-AS1    antisense
+  
+  
+```{r MultiAssayExperiment: analysis selection}
+wide_AE_MultiAssay <- wideFormat(AE_MultiAssay.CEA.sub, 
+                                 colDataCols = c("Age", "Gender", "Hospital", 
+                                                 "BMI", "GFR_MDRD", 
+                                                 "Hypertension.composite", "DiabetesStatus", "Med.Statin.LLD"))
+# wide_AE_MultiAssay 
+dim(wide_AE_MultiAssay)
+
+table(wide_AE_MultiAssay$Gender, wide_AE_MultiAssay$Hospital)
+
+```
+
+#### AEMS450K1 vs. AERNA
+```{r MultiAssayExperiment: analysis MODEL1-AEMS450K1}
+model1a = "AERNA_ENSG00000198001 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital"
+model1b = "AERNA_ENSG00000129317 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital"
+model1c = "AERNA_ENSG00000147889 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital"
+model1d = "AERNA_ENSG00000147883 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital"
+model1e = "AERNA_ENSG00000240498 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital"
+
+irak4_lm <- lm(as.formula(model1a), data = wide_AE_MultiAssay)
+pus7l_lm <- lm(as.formula(model1b), data = wide_AE_MultiAssay)
+cdkn2a_lm <- lm(as.formula(model1c), data = wide_AE_MultiAssay)
+cdkn2b_lm <- lm(as.formula(model1d), data = wide_AE_MultiAssay)
+cdkn2bas1_lm <- lm(as.formula(model1e), data = wide_AE_MultiAssay)
+
+summary(irak4_lm)
+summary(pus7l_lm)
+summary(cdkn2bas1_lm)
+summary(cdkn2a_lm)
+summary(cdkn2b_lm)
+
+```
+
+```{r MultiAssayExperiment: analysis MODEL2-AEMS450K1}
+model2a = "AERNA_ENSG00000198001 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital + BMI + GFR_MDRD + Hypertension.composite + DiabetesStatus + Med.Statin.LLD"
+model2b = "AERNA_ENSG00000129317 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital + BMI + GFR_MDRD + Hypertension.composite + DiabetesStatus + Med.Statin.LLD"
+model2c = "AERNA_ENSG00000147889 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital + BMI + GFR_MDRD + Hypertension.composite + DiabetesStatus + Med.Statin.LLD"
+model2d = "AERNA_ENSG00000147883 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital + BMI + GFR_MDRD + Hypertension.composite + DiabetesStatus + Med.Statin.LLD"
+model2e = "AERNA_ENSG00000240498 ~ AEMS450K1_cg20461126 + Age + Gender + Hospital + BMI + GFR_MDRD + Hypertension.composite + DiabetesStatus + Med.Statin.LLD"
+
+irak4_lm_add <- lm(as.formula(model2a), data = wide_AE_MultiAssay)
+pus7l_lm_add <- lm(as.formula(model2b), data = wide_AE_MultiAssay)
+cdkn2a_lm_add <- lm(as.formula(model2c), data = wide_AE_MultiAssay)
+cdkn2b_lm_add <- lm(as.formula(model2d), data = wide_AE_MultiAssay)
+cdkn2bas1_lm_add <- lm(as.formula(model2e), data = wide_AE_MultiAssay)
+
+summary(irak4_lm_add)
+summary(pus7l_lm_add)
+summary(cdkn2bas1_lm_add)
+summary(cdkn2a_lm_add)
+summary(cdkn2b_lm_add)
+
+```
+
+
+
+# Information {.tabset .tabset-fade .tabset-pills}
+## Session information 
+
+------
+
+    Version:     v1.0.3
+    Last update: 2020-08-06
+    Written by:  Sander W. van der Laan (s.w.vanderlaan-2[at]umcutrecht.nl).
+    Description: ELSIE: EvoLutionary Selection In Epigenetics and transcriptomics in the Athero-Express Biobank Study. 
+    Minimum requirements: R version 3.5.2 (2018-12-20) -- 'Eggshell Igloo', macOS Mojave (10.14.2).
+    
+    Changes log
+    * v1.0.2 Analysis of target CpG and target genes.. 
+    * v1.0.2 Some fixes to the annotations. 
+    * v1.0.1 Updated RNAseq data with Ensemble gene codes. Updated and filtered methylation data. Updated clinical data. General updates to codes. 
+    * v1.0.0 Initial version. 
+
+  
+------
+
+```{r eval = TRUE}
+sessionInfo()
+```
+
+
+## Saving environment
+
+Saving RDS of `MultiAssayExperiment`.
+```{r AE_MultiAssay: saving AE_MultiAssay as RDS}
+
+# Save as RDS
+saveRDS(AE_MultiAssay.CEA, paste0(OUT_loc, "/",Today,".",PROJECTNAME,".AE_MEA.CEA.allClinData.rds"))
+
+```
+
+```{r cleaning environment}
+rm(AEMS450K1.SE.rowData, AEMS450K2.SE.rowData,
+   AEMS450K1.SE.assay, AEMS450K2.SE.assay,
+   AEMS450K1.SE.metadata, AEMS450K2.SE.metadata,
+   aems450k1.MvaluesQCIMPplaqueSE, aems450k2.MvaluesQCIMPplaqueSE,
+   aems450k1.MvaluesQCIMPplaqueSECLEAN, aems450k2.MvaluesQCIMPplaqueSECLEAN,
+   AEMS450K1.SE, AEMS450K2.SE)
+
+rm(AERNA_UMIcorrSE, AERNA_UMIcorr,
+   bulkRNA_counts, bulkRNA_rowRanges, bulkRNA_meta)
+
+rm(AE_MultiAssay)
+
+rm(infobcp, 
+   hm450.hg19.manifest.180909, hm450.hg19.manifest.naeem, hm450.hg19.manifest.naeem.list, hm450.controls, hm450.manifest.pop.GoNL)
+
+rm(UPID_ZIPcodes)
+
+rm(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+rm(AE_MultiAssay, AE_MultiAssay.CEA)
+
+rm(counts, scRNAseqData)
+
+```
+
+```{r Saving}
+save.image(paste0(PROJECT_loc, "/",Today,".",PROJECTNAME,".results.RData"))
+```
+
+------
+<sup>&copy; 1979-2020 Sander W. van der Laan | s.w.vanderlaan-2[at]umcutrecht.nl | [swvanderlaan.github.io](https://swvanderlaan.github.io).</sup>
+------
+
+
+
